@@ -97,8 +97,8 @@ int _ws_openssl_close(ws_t ws)
 	{
 		SSL_set_shutdown(ws->ssl, SSL_RECEIVED_SHUTDOWN);
 		SSL_shutdown(ws->ssl);
-		SSL_free(ws->ssl);
-		ws->ssl = NULL;
+//		SSL_free(ws->ssl); <<-- Causes double freeing of the SSL, as libevent also tries to free it after that
+                ws->ssl = NULL;
 	}
 
 	LIBWS_LOG(LIBWS_TRACE, "End");
@@ -114,7 +114,7 @@ struct bufferevent * _ws_create_bufferevent_openssl_socket(ws_t ws)
 
 	if (!(bev = bufferevent_openssl_socket_new(ws->ws_base->ev_base, -1, 
 			ws->ssl, BUFFEREVENT_SSL_CONNECTING, 
-			BEV_OPT_CLOSE_ON_FREE|BEV_OPT_DEFER_CALLBACKS)))
+                        BEV_OPT_CLOSE_ON_FREE | BEV_OPT_DEFER_CALLBACKS | _LIBWS_LE2_OPT_THREADSAFE)))
 	{
 		LIBWS_LOG(LIBWS_ERR, "Failed to create SSL socket");
 		return NULL;

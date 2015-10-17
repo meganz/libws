@@ -174,38 +174,68 @@ static void _ws_pong_timeout_event(evutil_socket_t fd, short what, void *arg)
 	}
 }
 
-static int _ws_setup_timeout_event(ws_t ws, event_callback_fn func, 
-									struct event **ev, struct timeval *tv)
+int _ws_setup_timeout_event(ws_t ws, event_callback_fn func, ws_timer* timer, struct timeval *tv)
 {
 	assert(ws);
-	assert(ev);
+        assert(timer);
 	assert(func);
 	assert(tv);
 
 	LIBWS_LOG(LIBWS_TRACE, "Setting up new timeout event");
 
-	if (*ev)
+        if (*timer)
 	{
-		event_free(*ev);
-		*ev = NULL;
+            _ws_free_timer(timer);
 	}
-
-	if (!(*ev = evtimer_new(ws->ws_base->ev_base, 
-							func, (void *)ws)))
+        ws_base_t base = ws->ws_base;
+#ifdef LIBWS_MULTITHREADED
+        *timer = malloc(sizeof(struct ws_timer_s));
+        if (!*timer)
+        {
+            LIBWS_LOG(LIBWS_ERR, "Failed to allocate memory for ws_timer struct");
+            return -1;
+        }
+        if (!((*timer)->evtimer = evtimer_new(base->ev_base, base->marshall_timer_cb, (void*)*timer)))
+        {
+            free(*timer);
+            *timer = NULL;
+            LIBWS_LOG(LIBWS_ERR, "Failed to create evtimer for timeout event");
+            return -1;
+        }
+        (*timer)->ws = ws;
+        (*timer)->handler = func;
+        if (evtimer_add((*timer)->evtimer, tv))
+#else
+        *timer = evtimer_new(base->ev_base, func, (void *)ws);
+        if (!*timer)
 	{
-		LIBWS_LOG(LIBWS_ERR, "Failed to create timeout event");
-		return -1;
+            LIBWS_LOG(LIBWS_ERR, "Failed to create timeout event");
+            return -1;
 	}
-
-	if (evtimer_add(*ev, tv))
+        if (evtimer_add(*timer, tv))
+#endif
 	{
-		LIBWS_LOG(LIBWS_ERR, "Failed to add timeout event");
-		event_free(*ev);
-		*ev = NULL;
-		return -1;
+            LIBWS_LOG(LIBWS_ERR, "Failed to add timeout event");
+            _ws_free_timer(timer);
+            return -1;
 	}
 
 	return 0;
+}
+
+void _ws_free_timer(ws_timer* timer)
+{
+    if (!*timer)
+        return;
+
+#ifdef LIBWS_MULTITHREADED
+    assert((*timer)->evtimer);
+    evtimer_del((*timer)->evtimer);
+    free(*timer);
+#else
+    evtimer_del(*timer);
+#endif
+    *timer = NULL;
 }
 
 int _ws_setup_pong_timeout(ws_t ws)
@@ -243,8 +273,7 @@ static int _ws_handle_close_frame(ws_t ws)
 
 	if (ws->close_timeout_event)
 	{
-		event_free(ws->close_timeout_event);
-		ws->close_timeout_event = NULL;
+                _ws_free_timer(&ws->close_timeout_event);
 	}
 
 	ws->state = WS_STATE_CLOSING;
@@ -685,7 +714,7 @@ void _ws_read_websocket(ws_t ws, struct evbuffer *in)
 /// Libevent bufferevent callback for when there is data to be read
 /// on the websocket socket.
 ///
-static void _ws_read_callback(struct bufferevent *bev, void *ptr)
+void ws_read_callback(struct bufferevent *bev, void *ptr)
 {
 	ws_t ws = (ws_t)ptr;
 	struct evbuffer *in;
@@ -735,11 +764,11 @@ static void _ws_read_callback(struct bufferevent *bev, void *ptr)
 /// Libevent bufferevent callback for when a write is done on
 /// the websocket socket.
 ///
-static void _ws_write_callback(struct bufferevent *bev, void *ptr)
+void ws_write_callback(struct bufferevent *bev, void *ptr)
 {
-	ws_t ws = (ws_t)ptr;
-	assert(ws);
-	assert(bev);
+        ws_t ws = (ws_t)ptr;
+        assert(ws);
+        assert(bev);
 
 	LIBWS_LOG(LIBWS_DEBUG, "Write callback");
 }
@@ -754,8 +783,7 @@ static void _ws_connected_event(struct bufferevent *bev, short events, void *arg
 	if (ws->connect_timeout_event)
 	{
 		LIBWS_LOG(LIBWS_DEBUG, "Freeing connect timeout event");
-		event_free(ws->connect_timeout_event);
-		ws->connect_timeout_event = NULL;
+                _ws_free_timer(&ws->connect_timeout_event);
 	}
 
 	bufferevent_enable(ws->bev, EV_READ | EV_WRITE);
@@ -887,7 +915,7 @@ static void _ws_error_event(struct bufferevent *bev, short events, void *ptr)
 /// Libevent bufferevent callback for when an event occurs on
 /// the websocket socket.
 ///
-static void _ws_event_callback(struct bufferevent *bev, short events, void *ptr)
+void ws_event_callback(struct bufferevent *bev, short events, void *ptr)
 {
 	ws_t ws = (ws_t)ptr;
 	assert(ws);
@@ -930,7 +958,7 @@ int _ws_create_bufferevent_socket(ws_t ws)
 {
 	int ret = 0;
 	assert(ws);
-
+        ws_base_t base = ws->ws_base;
 	LIBWS_LOG(LIBWS_DEBUG, "Create bufferevent socket");
 
 	#ifdef LIBWS_WITH_OPENSSL
@@ -946,18 +974,22 @@ int _ws_create_bufferevent_socket(ws_t ws)
 	else
 	#endif // LIBWS_WITH_OPENSSL
 	{
-		if (!(ws->bev = bufferevent_socket_new(ws->ws_base->ev_base, -1, 
-										BEV_OPT_CLOSE_ON_FREE)))
+                if (!(ws->bev = bufferevent_socket_new(base->ev_base, -1,
+                        _LIBWS_LE2_OPT_THREADSAFE | BEV_OPT_CLOSE_ON_FREE)))
 		{
 			LIBWS_LOG(LIBWS_ERR, "Failed to create socket");
 			ret = -1;
 			goto fail;
 		}
 	}
-
-	bufferevent_setcb(ws->bev, _ws_read_callback, _ws_write_callback, 
-					_ws_event_callback, (void *)ws);
-
+#ifdef LIBWS_MULTITHREADED
+        assert(base->marshall_read_cb && base->marshall_write_cb && base->marshall_event_cb);
+        bufferevent_setcb(ws->bev, base->marshall_read_cb, base->marshall_write_cb,
+                          base->marshall_event_cb, (void*)ws);
+#else
+        bufferevent_setcb(ws->bev, ws_read_callback, ws_write_callback,
+                          ws_event_callback, (void*)ws);
+#endif
 	return ret;
 fail:
 	if (ws->bev)
@@ -1101,8 +1133,7 @@ void _ws_shutdown(ws_t ws)
 
 	if (ws->connect_timeout_event)
 	{
-		event_free(ws->connect_timeout_event);
-		ws->connect_timeout_event = NULL;
+                _ws_free_timer(&ws->connect_timeout_event);
 	}
 
 	#ifdef LIBWS_WITH_OPENSSL

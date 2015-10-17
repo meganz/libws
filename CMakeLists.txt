@@ -12,6 +12,7 @@ option(LIBWS_WITH_LOG "Compile with logging support" ON)
 option(LIBWS_WITH_MEMCHECK "Run valgrind on tests" ON)
 option(LIBWS_WITH_EXAMPLES "Compile with example programs" ON)
 option(LIBWS_WITH_AUTOBAHN "Compile the Autobahn test suite client. This requires extra dependencies." OFF)
+option(LIBWS_MULTITHREADED "Support marshalling of libevent callbacks")
 
 set(PROJECT_VERSION ${PROJECT_MAJOR_VERSION}.${PROJECT_MINOR_VERSION}.${PROJECT_PATCH_VERSION})
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/CMakeModules)

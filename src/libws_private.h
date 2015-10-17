@@ -33,6 +33,13 @@
 #include <event2/bufferevent_ssl.h>
 #endif // LIBWS_WITH_OPENSSL
 
+#ifdef LIBWS_MULTITHREADED
+//The option to add to bufferevent creation to enable thread safety of bufferevent
+    #define _LIBWS_LE2_OPT_THREADSAFE BEV_OPT_THREADSAFE
+#else
+    #define _LIBWS_LE2_OPT_THREADSAFE 0
+#endif
+
 typedef enum ws_send_state_e
 {
     WS_SEND_STATE_NONE,
@@ -50,19 +57,6 @@ typedef enum ws_connect_state_e
     WS_CONNECT_STATE_PARSED_HEADERS,
     WS_CONNECT_STATE_HANDSHAKE_COMPLETE
 } ws_connect_state_t;
-
-///
-/// Global context for the library.
-///
-typedef struct ws_base_s
-{
-    #ifndef WIN32
-    int random_fd;
-    #endif
-
-    struct event_base *ev_base;  ///< Libevent event base.
-    struct evdns_base *dns_base; ///< Libevent DNS base.
-} ws_base_s;
 
 ///
 /// Context for a websocket connection.
@@ -146,7 +140,7 @@ typedef struct ws_s
                                 ///< Connection timeout.
     void *connect_timeout_arg;  ///< The user supplied argument that is passed
                                 /// to the ws_s#connect_timeout_cb callback.
-    struct event *connect_timeout_event; 
+    ws_timer connect_timeout_event;
                                 ///< Libevent event that is fired when the
                                 /// connection times out.
     /// @}
@@ -161,7 +155,7 @@ typedef struct ws_s
 
     ///
     /// @defgroup PongCallback Pong callback
-    /// @{
+    /// @{
     ///
     ws_msg_callback_f pong_cb;  ///< User supplied callback for
                                 /// when a pong frame is received.
@@ -170,7 +164,7 @@ typedef struct ws_s
     ws_timeout_callback_f pong_timeout_cb;
     void *pong_timeout_arg;
     struct timeval pong_timeout;
-    struct event *pong_timeout_event;
+    ws_timer pong_timeout_event;
     /// @}
 
     ///
@@ -201,7 +195,7 @@ typedef struct ws_s
 
     int binary_mode;            ///< If this is set messages
                                 /// will be sent as binary.
-       int debug_level;
+    int debug_level;
     uint64_t max_frame_size;    ///< The max frame size to allow before chunking.
 
     ///
@@ -223,7 +217,7 @@ typedef struct ws_s
     size_t ctrl_len;            ///< Length of the control payload.
     int received_close;         ///< Did we receive a close frame?
     int sent_close;             ///< Have we sent a close frame?
-    struct event *close_timeout_event; 
+    ws_timer close_timeout_event;
                                 ///< Timeout even for waiting for a close reply.
     ws_close_status_t server_close_status; 
                                 ///< The Close status the server sent.
@@ -260,6 +254,15 @@ typedef struct ws_s
     #endif // LIBWS_WITH_OPENSSL
 } ws_s;
 
+///
+/// Creates a timeout timer
+///
+int _ws_setup_timeout_event(ws_t ws, event_callback_fn func, ws_timer* timer, struct timeval *tv);
+
+///
+/// Frees and NULLs an timer.
+///
+void _ws_free_timer(ws_timer *timer);
 
 ///
 /// Creates a timeout event for when connecting.
@@ -398,9 +401,5 @@ void _ws_set_memory_functions(ws_malloc_replacement_f malloc_replace,
                              ws_free_replacement_f free_replace,
                              ws_realloc_replacement_f realloc_replace);
 
-///
-/// Frees and NULLs an libevent event.
-///
-void _ws_destroy_event(struct event **event);
 
 #endif // __LIBWS_PRIVATE_H__

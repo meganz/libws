@@ -5,12 +5,34 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <event2/event.h>
+#include <event2/bufferevent.h>
 
 #ifdef _WIN32
 #include <time.h>
 #else
 #include <sys/time.h>
 #endif
+
+///
+/// Global context for the library.
+///
+typedef struct ws_base_s
+{
+    #ifndef WIN32
+    int random_fd;
+    #endif
+
+    struct event_base *ev_base;  ///< Libevent event base.
+    struct evdns_base *dns_base; ///< Libevent DNS base.
+
+#ifdef LIBWS_MULTITHREADED
+    bufferevent_data_cb marshall_read_cb;
+    bufferevent_data_cb marshall_write_cb;
+    bufferevent_event_cb marshall_event_cb;
+    event_callback_fn marshall_timer_cb;
+#endif
+} ws_base_s;
 
 typedef struct ws_s *ws_t;
 typedef struct ws_base_s *ws_base_t;
@@ -258,6 +280,27 @@ typedef enum libws_ssl_state_e
 #endif // LIBWS_WITH_OPENSSL
 
 #define WS_RANDOM_PATH "/dev/urandom"
+
+#ifdef LIBWS_MULTITHREADED
+/// If we are using timer callback marshalling, we need to save the actual callback pointer somewhere,
+/// so that the marshaller knows what to call. So, we put all info in a structure that contains also
+/// the libevent timer event itself, and the callback argument. We don't contain the event struct
+/// statically (but a pointer to it) for compatibility reasons with future versions of libevent whose
+/// sizeof (struct event) may change, and because normally struct event is an opaque struct
+/// which is not exposed to user code. Thus we do an extra malloc for the timer struct (vs only one
+/// for the event struct), but we have compatibility guaranteed.
+typedef struct ws_timer_s
+{
+    ws_t ws;
+    event_callback_fn handler;
+    struct event* evtimer;
+} ws_timer_s;
+
+typedef struct ws_timer_s* ws_timer;
+#else
+/// If we don't do marshalling, we just map the ws_timer type to struct event
+    typedef struct event* ws_timer;
+#endif
 
 typedef void (*ws_msg_callback_f)(ws_t ws, char *msg, uint64_t len,
 			int binary, void *arg);

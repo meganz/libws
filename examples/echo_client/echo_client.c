@@ -22,7 +22,7 @@ void onmsg(ws_t ws, char *msg, uint64_t len, int binary, void *arg)
 	if (*echo_count == 0)
 	{
 		printf("Got last echo\n");
-		ws_close(ws);
+                ws_close(ws);
 	}
 }
 
@@ -30,7 +30,7 @@ void onclose(ws_t ws, ws_close_status_t status,
 			const char *reason, size_t reason_len, void *arg)
 {
 	printf("Closing %u\n", (uint16_t)status);
-	ws_base_quit(ws_get_base(ws), 1);
+        ws_base_quit(ws_get_base(ws), 1);
 }
 
 void onconnect(ws_t ws, void *arg)
@@ -48,21 +48,7 @@ int main(int argc, char **argv)
 	ws_base_t base = NULL;
 	ws_t ws = NULL;
 	int echo_count = 5;
-	int ssl = 0;
-	char *server = "localhost";
-
-	for (i = 1; i < argc; i++)
-	{
-		if (!strcmp(argv[i], "--ssl"))
-		{
-			ssl = 1;
-		}
-		else
-		{
-			server = argv[i];
-		}
-	}
-
+        int ssl = 1;
 	ws_set_log_cb(ws_default_log_cb);
 	ws_set_log_level(-1);
 
@@ -89,10 +75,10 @@ int main(int argc, char **argv)
 	{
 		ws_set_ssl_state(ws, LIBWS_SSL_SELFSIGNED);
 	}
-
+        const char* server = "echo.websocket.org";
 	printf("Connect to server %s\n", server);
 
-	if (ws_connect(ws, server, 9500, ""))
+        if (ws_connect(ws, server, 443, "?encoding=text"))
 	{
 		ret = -1;
 		goto fail;

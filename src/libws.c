@@ -257,9 +257,9 @@ void ws_destroy(ws_t *ws)
 		_ws_free(w->origin);
 	}
 
-	_ws_destroy_event(&w->connect_timeout_event);
-	_ws_destroy_event(&w->close_timeout_event);
-	_ws_destroy_event(&w->pong_timeout_event);
+        _ws_free_timer(&w->connect_timeout_event);
+        _ws_free_timer(&w->close_timeout_event);
+        _ws_free_timer(&w->pong_timeout_event);
 
 	// Must be done after the bufferevent is freed.
 	if (w->rate_limits)
@@ -394,35 +394,28 @@ int ws_close_with_status_reason(ws_t ws, ws_close_status_t status,
 	// Give the server time to initiate the closing of the
 	// TCP session. Otherwise we'll force an unclean shutdown
 	// ourselves.
-	if (ws->close_timeout_event) event_free(ws->close_timeout_event);
+        if (ws->close_timeout_event)
+        {
+            _ws_free_timer(&ws->close_timeout_event);
+        }
 
-	if (!(ws->close_timeout_event = evtimer_new(ws->ws_base->ev_base, 
-									_ws_close_timeout_cb, (void *)ws)))
+        tv.tv_sec = 3; // TODO: Let the user set this.
+        tv.tv_usec = 0;
+
+        if (_ws_setup_timeout_event(ws, _ws_close_timeout_cb, &ws->close_timeout_event, &tv))
 	{
 		LIBWS_LOG(LIBWS_ERR, "Failed to create close timeout event");
 		goto fail;
 	}
-
-	tv.tv_sec = 3; // TODO: Let the user set this.
-	tv.tv_usec = 0;
-
-	if (evtimer_add(ws->close_timeout_event, &tv))
-	{
-		LIBWS_LOG(LIBWS_ERR, "Failed to add close timeout event");
-		goto fail;
-	}
-
 	return 0;
 
 fail:
-
 	// If we fail to send the close frame, we do a TCP close
 	// right away (unclean websocket close).
 
 	if (ws->close_timeout_event)
 	{
-		event_free(ws->close_timeout_event);
-		ws->close_timeout_event = NULL;
+                _ws_free_timer(&ws->close_timeout_event);
 	}
 
 	LIBWS_LOG(LIBWS_ERR, "Failed to send close frame, "

@@ -2,23 +2,21 @@
 #ifndef __LIBWS_H__
 #define __LIBWS_H__
 
+#include <event2/event.h>
 #include "libws_config.h"
 #include "libws_types.h"
 #include "libws_header.h"
 #include "libws_compat.h"
 
 #include <stdio.h>
-#include <event2/event.h>
 #include <stdint.h>
 #include <inttypes.h>
 
 ///
 /// Initializes the global context for the library that's common
 /// for all connections.
-///
 /// @param[out]	base 	A pointer to a #ws_base_t to use as global context.
-///
-/// @returns 			0 on success.
+/// @returns            0 on success.
 ///
 int ws_global_init(ws_base_t *base);
 
@@ -165,6 +163,15 @@ int ws_base_quit_delay(ws_base_t base, int let_running_events_complete,
 /// @returns 0 on success.
 ///
 int ws_base_quit(ws_base_t base, int let_running_events_complete);
+
+#ifdef LIBWS_MULTITHREADED
+/// Expose the internal libevent callbacks as we will need to call them on another thread by the
+/// marshalling mechanism of the application
+///
+void ws_read_callback(struct bufferevent *bev, void *ptr);
+void ws_write_callback(struct bufferevent *bev, void *ptr);
+void ws_event_callback(struct bufferevent *bev, short events, void *ptr);
+#endif
 
 ///
 /// Send a websocket message.
