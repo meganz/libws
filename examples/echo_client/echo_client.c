@@ -26,8 +26,8 @@ void onmsg(ws_t ws, char *msg, uint64_t len, int binary, void *arg)
 	}
 }
 
-void onclose(ws_t ws, ws_close_status_t status,
-			const char *reason, size_t reason_len, void *arg)
+void onclose(ws_t ws, int status, int errtype,
+             const char *reason, size_t reason_len, void *arg)
 {
 	printf("Closing %u\n", (uint16_t)status);
         ws_base_quit(ws_get_base(ws), 1);

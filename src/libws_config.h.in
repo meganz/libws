@@ -4,7 +4,7 @@
 
 #cmakedefine LIBWS_WITH_OPENSSL 1
 #cmakedefine LIBWS_WITH_LOG 1
-#cmakedefine LIBWS_MULTITHREADED 1
+#cmakedefine LIBWS_EXTERNAL_LOOP 1
 
 #cmakedefine LIBWS_HAVE_STDINT_H
 #cmakedefine LIBWS_HAVE_INTTYPES_H

@@ -51,7 +51,7 @@ void ws_set_memory_functions(ws_malloc_replacement_f malloc_replace,
 {
 	_ws_set_memory_functions(malloc_replace, free_replace, realloc_replace);
 }
-
+#ifndef LIBWS_EXTERNAL_LOOP
 int ws_global_init(ws_base_t *base)
 {
 	#ifdef _WIN32
@@ -145,11 +145,9 @@ fail:
 
 	return -1;
 }
-
 void ws_global_destroy(ws_base_t *base)
 {
 	ws_base_t b;
-
 	assert(base);
 
 	b = *base;
@@ -194,6 +192,50 @@ void ws_global_destroy(ws_base_t *base)
 
 	// TODO: Should we destroy all connections here as well?
 }
+#else
+int ws_global_init(ws_base_t base, struct event_base* evbase, struct evdns_base* dnsbase,
+    bufferevent_data_cb marshall_read_cb, bufferevent_event_cb marshall_event_cb,
+    event_callback_fn marshall_timer_cb)
+{
+    assert(base);
+    memset(base, 0, sizeof(ws_base_s));
+#ifndef _WIN32
+    if ((base->random_fd = open(WS_RANDOM_PATH, O_RDONLY)) < 0)
+    {
+        LIBWS_LOG(LIBWS_ERR, "Failed to open random source %s , %d", WS_RANDOM_PATH, base->random_fd);
+        return -1;
+    }
+#endif
+
+    base->ev_base = evbase;
+    base->dns_base = dnsbase;
+    if (marshall_read_cb && marshall_event_cb && marshall_timer_cb)
+    {
+        base->marshall_read_cb = marshall_read_cb;
+        base->marshall_event_cb = marshall_event_cb;
+        base->marshall_timer_cb = marshall_timer_cb;
+    }
+    else
+    {
+        assert(!marshall_read_cb && !marshall_event_cb && marshall_timer_cb);
+        base->marshall_read_cb = ws_read_callback;
+        base->marshall_event_cb = ws_event_callback;
+        base->marshall_timer_cb = ws_handle_marshall_timer_cb;
+    }
+    return 0;
+}
+
+void ws_global_destroy(ws_base_t *base)
+{
+    assert(*base);
+    if (close((*base)->random_fd))
+    {
+        LIBWS_LOG(LIBWS_ERR, "Failed to close random source: %s (%d)", strerror(errno), errno);
+    }
+
+    _ws_free(*base);
+}
+#endif
 
 int ws_init(ws_t *ws, ws_base_t ws_base)
 {
@@ -236,8 +278,13 @@ int ws_init(ws_t *ws, ws_base_t ws_base)
 
 	return 0;
 }
-
-void ws_destroy(ws_t *ws)
+void
+#ifndef LIBWS_EXTERNAL_LOOP
+    ws_destroy
+#else
+    _ws_do_destroy
+#endif
+(ws_t *ws)
 {
 	struct ws_s *w;
 	
@@ -282,6 +329,30 @@ void ws_destroy(ws_t *ws)
 	_ws_free(w);
 	*ws = NULL;
 }
+#ifdef LIBWS_EXTERNAL_LOOP
+
+///destroy the ws_t object upon receiving the async destroy message
+void _ws_handle_async_destroy_msg(int fd, short events, void* userp)
+{
+    ws_t ws = (ws_t)userp;
+    assert(ws->state == WS_STATE_DESTROYING);
+    _ws_do_destroy(&ws);
+}
+
+//Post a fake timer message through the marshaller to make sure all previous queued messages have
+//been processed before this one is received, so that we can safely delete the websocket instance
+//without an event arriving after that with an invalid pointer
+void ws_destroy(ws_t *ws)
+{
+    (*ws)->state = WS_STATE_DESTROYING;
+    ws_timer timer = (ws_timer)_ws_malloc(sizeof(struct ws_timer_s));
+    timer->handler = _ws_handle_async_destroy_msg;
+    timer->evtimer = NULL;
+    timer->ws = *ws;
+    timer->canceled = 0;
+    (*ws)->ws_base->marshall_timer_cb(0, EV_TIMEOUT, timer);
+}
+#endif
 
 ws_base_t ws_get_base(ws_t ws)
 {
@@ -300,7 +371,7 @@ int ws_connect(ws_t ws, const char *server, int port, const char *uri)
 	if ((ws->state != WS_STATE_CLOSED_CLEANLY)
 	 && (ws->state != WS_STATE_CLOSED_UNCLEANLY))
 	{
-		LIBWS_LOG(LIBWS_ERR, "Already connected or connecting");
+                LIBWS_LOG(LIBWS_ERR, "Already connected, connecting or being destroyed");
 		return -1;
 	}
 
@@ -329,16 +400,15 @@ int ws_connect(ws_t ws, const char *server, int port, const char *uri)
 	}
 
 	out = bufferevent_get_output(ws->bev);
-	
+
+        ws->state = WS_STATE_CONNECTING;
 	if (bufferevent_socket_connect_hostname(ws->bev, 
 				ws->ws_base->dns_base, AF_UNSPEC, ws->server, ws->port))
-	{
-		LIBWS_LOG(LIBWS_ERR, "Failed to create connect event");
+        {
+                LIBWS_LOG(LIBWS_ERR, "Immediate bufferevent_socket_connect_hostname failure");
 		ret = -1;
 		goto fail;
-	}
-
-	ws->state = WS_STATE_CONNECTING;
+        }
 
 	// Setup a timeout event for the connection attempt.
 	if (_ws_setup_connection_timeout(ws))
@@ -359,102 +429,127 @@ fail:
 int ws_close_with_status_reason(ws_t ws, ws_close_status_t status, 
 							const char *reason, size_t reason_len)
 {
-	struct timeval tv;
-	assert(ws);
+    struct timeval tv;
+    assert(ws);
 
-	LIBWS_LOG(LIBWS_TRACE, "Sending close frame %d, %*s", 
-			status, reason_len, reason);
+    if (ws->state == WS_STATE_CLOSING)
+    {
+        LIBWS_LOG(LIBWS_WARN, "Already closing");
+        return EALREADY;
+    }
+    ws->state = WS_STATE_CLOSING;
+    LIBWS_LOG(LIBWS_TRACE, "Sending close frame %d, %*s", status, reason_len, reason);
 
-	ws->state = WS_STATE_CLOSING;
-
-	// The underlying TCP connection, in most normal cases, SHOULD be closed
-	// first by the server, so that it holds the TIME_WAIT state and not the
-	// client (as this would prevent it from re-opening the connection for 2
-	// maximum segment lifetimes (2MSL), while there is no corresponding
-	// server impact as a TIME_WAIT connection is immediately reopened upon
-	// a new SYN with a higher seq number).  In abnormal cases (such as not
-	// having received a TCP Close from the server after a reasonable amount
-	// of time) a client MAY initiate the TCP Close.  As such, when a server
-	// is instructed to _Close the WebSocket Connection_ it SHOULD initiate
-	// a TCP Close immediately, and when a client is instructed to do the
-	// same, it SHOULD wait for a TCP Close from the server. 
-	
-	// Send a websocket close frame to the server.
-	if (!ws->sent_close)
-	{
-		if (_ws_send_close(ws, status, reason, reason_len))
-		{
-			LIBWS_LOG(LIBWS_ERR, "Failed to send close frame");
-			goto fail;
-		}
-	}
-
-	ws->sent_close = 1;
-
-	// Give the server time to initiate the closing of the
-	// TCP session. Otherwise we'll force an unclean shutdown
-	// ourselves.
-        if (ws->close_timeout_event)
+    // The underlying TCP connection, in most normal cases, SHOULD be closed
+    // first by the server, so that it holds the TIME_WAIT state and not the
+    // client (as this would prevent it from re-opening the connection for 2
+    // maximum segment lifetimes (2MSL), while there is no corresponding
+    // server impact as a TIME_WAIT connection is immediately reopened upon
+    // a new SYN with a higher seq number).  In abnormal cases (such as not
+    // having received a TCP Close from the server after a reasonable amount
+    // of time) a client MAY initiate the TCP Close.  As such, when a server
+    // is instructed to _Close the WebSocket Connection_ it SHOULD initiate
+    // a TCP Close immediately, and when a client is instructed to do the
+    // same, it SHOULD wait for a TCP Close from the server.
+    int err = 0;
+    char* errmsg = NULL;
+    // Send a websocket close frame to the server.
+    if (!ws->sent_close)
+    {
+        if (_ws_send_close(ws, status, reason, reason_len))
         {
-            _ws_free_timer(&ws->close_timeout_event);
+            err = EIO;
+            errmsg = "Error sending close frame";
+            goto fail;
         }
+    }
 
-        tv.tv_sec = 3; // TODO: Let the user set this.
-        tv.tv_usec = 0;
+    ws->sent_close = 1;
 
-        if (_ws_setup_timeout_event(ws, _ws_close_timeout_cb, &ws->close_timeout_event, &tv))
-	{
-		LIBWS_LOG(LIBWS_ERR, "Failed to create close timeout event");
-		goto fail;
-	}
-	return 0;
+    // Give the server time to initiate the closing of the
+    // TCP session. Otherwise we'll force an unclean shutdown
+    // ourselves.
+    if (ws->close_timeout_event)
+    {
+        _ws_free_timer(&ws->close_timeout_event);
+    }
 
+    tv.tv_sec = 3; // TODO: Let the user set this.
+    tv.tv_usec = 0;
+
+    if (_ws_setup_timeout_event(ws, _ws_close_timeout_cb, &ws->close_timeout_event, &tv))
+    {
+        err = ENOBUFS; //TODO: find a better code
+        errmsg = "Error creating close timeout timer";
+        goto fail;
+    }
+    return 0;
+    
 fail:
-	// If we fail to send the close frame, we do a TCP close
-	// right away (unclean websocket close).
+    // If we fail to send the close frame, we do a TCP close
+    // right away (unclean websocket close).
+    ws->state = WS_STATE_CLOSED_UNCLEANLY;
+    if (ws->close_timeout_event)
+    {
+        _ws_free_timer(&ws->close_timeout_event);
+    }
 
-	if (ws->close_timeout_event)
-	{
-                _ws_free_timer(&ws->close_timeout_event);
-	}
-
-	LIBWS_LOG(LIBWS_ERR, "Failed to send close frame, "
-						 "forcing unclean close");
-
-	_ws_shutdown(ws);
-
-	if (ws->close_cb)
-	{
-		char reason[] = "Problem sending close frame";
-		ws->close_cb(ws, WS_CLOSE_STATUS_ABNORMAL_1006, 
-					reason, sizeof(reason), ws->close_arg);
-	}
-
-	return -1;
+    assert(err);
+    assert(errmsg);
+    LIBWS_LOG(LIBWS_ERR, "%s, forcing unclean close", errmsg);
+    if (ws->close_cb)
+    {
+        ws->close_cb(ws, err, WS_ERRTYPE_LIB, errmsg, strlen(errmsg), ws->close_arg);
+    }
+    _ws_shutdown(ws);
+    return -1;
 }
 
 int ws_close_with_status(ws_t ws, ws_close_status_t status)
 {
-	return ws_close_with_status_reason(ws, status, NULL, 0);
+    return ws_close_with_status_reason(ws, status, NULL, 0);
 }
 
 int ws_close(ws_t ws)
 {
-	return ws_close_with_status_reason(ws, 
-			WS_CLOSE_STATUS_NORMAL_1000, NULL, 0);
+    return ws_close_with_status_reason(ws, WS_CLOSE_STATUS_NORMAL_1000, NULL, 0);
+}
+
+void ws_close_immediately(ws_t ws)
+{
+    assert(ws);
+    if (ws->close_timeout_event)
+    {
+        _ws_free_timer(&ws->close_timeout_event);
+    }
+
+    if (ws->state == WS_STATE_CLOSING)
+    {
+        assert(ws->sent_close);
+        ws->state = WS_STATE_CLOSED_UNCLEANLY;
+    }
+    else
+    {
+        ws->state = WS_STATE_CLOSING;
+        if (_ws_send_close(ws, WS_CLOSE_STATUS_GOING_AWAY_1001, "abort", 5))
+        {
+            LIBWS_LOG(LIBWS_ERR, "Error sending close frame");
+        }
+        ws->sent_close = 1;
+        ws->state = WS_STATE_CLOSED_UNCLEANLY;
+    }
 }
 
 int ws_base_service(ws_base_t base)
 {
-	assert(base);
+    assert(base);
 
-	if (event_base_loop(base->ev_base, EVLOOP_NONBLOCK))
-	{
-		LIBWS_LOG(LIBWS_ERR, "Failed to feed event loop");
-		return -1;
-	}
-
-	return 0;
+    if (event_base_loop(base->ev_base, EVLOOP_NONBLOCK))
+    {
+        LIBWS_LOG(LIBWS_ERR, "Failed to feed event loop");
+        return -1;
+    }
+    return 0;
 }
 
 int ws_base_service_blocking(ws_base_t base)
@@ -731,7 +826,6 @@ int ws_msg_end(ws_t ws)
 
 int ws_send_msg_ex(ws_t ws, char *msg, uint64_t len, int binary)
 {
-	int saved_binary_mode;
 	uint64_t curlen;
 	uint64_t remaining;
 	assert(ws);
@@ -881,14 +975,6 @@ void ws_set_onmsg_frame_end_cb(ws_t ws, ws_msg_frame_end_callback_f func,
 
 	ws->msg_frame_end_cb = func ? func : ws_default_msg_frame_end_cb;
 	ws->msg_frame_end_arg = arg;
-}
-
-void ws_set_onerr_cb(ws_t ws, ws_err_callback_f func, void *arg)
-{
-	assert(ws);
-
-	ws->err_cb = func;
-	ws->err_arg = arg;
 }
 
 void ws_set_onclose_cb(ws_t ws, ws_close_callback_f func, void *arg)
@@ -1091,7 +1177,6 @@ char **ws_get_subprotocols(ws_t ws, size_t *count)
 	assert(ws);
 	size_t i;
 	char **ret = NULL;
-	size_t lengths = 0;
 
 	if (!ws->subprotocols)
 		return NULL;

@@ -63,33 +63,32 @@ void _ws_free(void *ptr)
 
 void *_ws_calloc(size_t count, size_t size)
 {
-	void *p = NULL;
+    if (!count || !size)
+        return NULL;
+    void* p;
+    if (replaced_ws_malloc)
+    {
+        size_t sz = count * size;
+        // TODO: If count > (size_t max / size), goto fail.
+        p = replaced_ws_malloc(sz);
+        if (!p)
+            goto fail;
+        memset(p, 0, sz);
+    }
+    else
+    {
+        p = calloc(count, size);
+        if (!p)
+            goto fail;
+    }
+    return p;
 
-	if (!count || !size)
-		return NULL;
-
-	if (replaced_ws_malloc)
-	{
-		size_t sz = count * size;
-		// TODO: If count > (size_t max / size), goto fail.
-		p = replaced_ws_malloc(sz);
-
-		if (p)
-			return memset(p, 0, sz);
-	}
-
-	p = calloc(count, size);
-
-	#ifdef WIN32
-	// Windows doesn't set ENOMEM properly.
-	if (!p)
-		goto fail;
-	#endif
-
-	return p;
 fail:
-	errno = ENOMEM;
-	return NULL;
+#ifdef WIN32
+// Windows doesn't set ENOMEM properly.
+    errno = ENOMEM;
+#endif
+    return NULL;
 }
 
 char *_ws_strdup(const char *str)
@@ -188,8 +187,8 @@ int _ws_setup_timeout_event(ws_t ws, event_callback_fn func, ws_timer* timer, st
             _ws_free_timer(timer);
 	}
         ws_base_t base = ws->ws_base;
-#ifdef LIBWS_MULTITHREADED
-        *timer = malloc(sizeof(struct ws_timer_s));
+#ifdef LIBWS_EXTERNAL_LOOP
+        *timer = _ws_malloc(sizeof(struct ws_timer_s));
         if (!*timer)
         {
             LIBWS_LOG(LIBWS_ERR, "Failed to allocate memory for ws_timer struct");
@@ -197,13 +196,14 @@ int _ws_setup_timeout_event(ws_t ws, event_callback_fn func, ws_timer* timer, st
         }
         if (!((*timer)->evtimer = evtimer_new(base->ev_base, base->marshall_timer_cb, (void*)*timer)))
         {
-            free(*timer);
+            _ws_free(*timer);
             *timer = NULL;
             LIBWS_LOG(LIBWS_ERR, "Failed to create evtimer for timeout event");
             return -1;
         }
         (*timer)->ws = ws;
         (*timer)->handler = func;
+        (*timer)->canceled = 0;
         if (evtimer_add((*timer)->evtimer, tv))
 #else
         *timer = evtimer_new(base->ev_base, func, (void *)ws);
@@ -216,27 +216,74 @@ int _ws_setup_timeout_event(ws_t ws, event_callback_fn func, ws_timer* timer, st
 #endif
 	{
             LIBWS_LOG(LIBWS_ERR, "Failed to add timeout event");
-            _ws_free_timer(timer);
+            _ws_do_free_timer(timer);
             return -1;
 	}
 
 	return 0;
 }
 
-void _ws_free_timer(ws_timer* timer)
+#ifdef LIBWS_EXTERNAL_LOOP
+void ws_handle_marshall_timer_cb(int fd, short events, void* userp)
+{
+    ws_timer timer = (ws_timer)userp;
+    if (timer->ws->state == WS_STATE_DESTROYING)
+    {
+        //we should not schedule timers once we are being destroyed
+        LIBWS_LOG(LIBWS_WARN, "BUG: Timer event received, but we are being destroyed. Ignoring");
+    }
+    else if (!timer->canceled)
+    {
+        timer->handler(fd, events, timer->ws);
+    }
+    _ws_do_free_timer(&timer);
+}
+
+/// This is called from within the timer handler, when the timer triggers.
+/// It can be called directly _only_ in case we could not successfully enable the timer,
+/// so it would never trigger and be freed
+inline void _ws_do_free_timer(ws_timer* timer)
+{
+    assert(timer);
+    ws_timer t = *timer;
+    assert(t);
+
+    if (t->evtimer) //in the case of the async destoy message, we don't have an actual evtimer, we just use the timer marshaller to async post a message
+    {
+        event_free(t->evtimer);
+    }
+    _ws_free(t);
+}
+
+///Destroy the timer asynchronously on LIBWS_EXTERNAL_LOOP enabled
+inline void _ws_free_timer(ws_timer* timer)
+{
+// timer will be deleted by the timer handler, when it triggers. It will always trigger, as we don't
+// actually cancel the timer, only flag it as canceled
+    (*timer)->canceled = 1;
+    *timer = NULL;
+}
+
+#else
+
+//We always destroy the timer synchronously if LIBWS_EXTERNAL_LOOP is disabled
+inline void _ws_free_timer(ws_timer* timer)
 {
     if (!*timer)
         return;
-
-#ifdef LIBWS_MULTITHREADED
-    assert((*timer)->evtimer);
-    evtimer_del((*timer)->evtimer);
-    free(*timer);
-#else
     evtimer_del(*timer);
-#endif
+    event_free(*timer);
     *timer = NULL;
 }
+
+/// If LIBWS_EXTERNAL_LOOP is not enabled, maps _ws_do_free_timer to _ws_free_timer, as
+/// we always work synchronously
+inline void _ws_do_free_timer(ws_timer* timer)
+{
+    _ws_free_timer(timer);
+}
+
+#endif
 
 int _ws_setup_pong_timeout(ws_t ws)
 {
@@ -345,7 +392,7 @@ static int _ws_handle_close_frame(ws_t ws)
 	if (!ws->sent_close)
 	{
 		LIBWS_LOG(LIBWS_INFO, "Echoing status code %d", ws->server_close_status);
-		return ws_close_with_status_reason(ws, 
+                return ws_close_with_status_reason(ws,
 			ws->server_close_status, 
 			ws->server_reason, 
 			ws->server_reason_len);
@@ -717,7 +764,12 @@ void _ws_read_websocket(ws_t ws, struct evbuffer *in)
 void ws_read_callback(struct bufferevent *bev, void *ptr)
 {
 	ws_t ws = (ws_t)ptr;
-	struct evbuffer *in;
+        if (ws->state == WS_STATE_DESTROYING)
+        {
+            LIBWS_LOG(LIBWS_DEBUG, "Read event received, but we are being destroyed. Ignoring");
+            return;
+        }
+        struct evbuffer *in;
 	assert(ws);
 	assert(bev);
 	assert(ws->bev == bev);
@@ -762,15 +814,11 @@ void ws_read_callback(struct bufferevent *bev, void *ptr)
 
 ///
 /// Libevent bufferevent callback for when a write is done on
-/// the websocket socket.
+/// the websocket socket. Currently unused
 ///
 void ws_write_callback(struct bufferevent *bev, void *ptr)
 {
-        ws_t ws = (ws_t)ptr;
-        assert(ws);
-        assert(bev);
-
-	LIBWS_LOG(LIBWS_DEBUG, "Write callback");
+    LIBWS_LOG(LIBWS_DEBUG, "Write callback");
 }
 
 static void _ws_connected_event(struct bufferevent *bev, short events, void *arg)
@@ -826,7 +874,7 @@ static void _ws_eof_event(struct bufferevent *bev, short events, void *ptr)
 
 	if (evbuffer_get_length(in) > 0)
 	{
-		LIBWS_LOG(LIBWS_DEBUG, "Left %u bytes at EOF", evbuffer_get_length(in));
+                LIBWS_LOG(LIBWS_DEBUG, "Left %u bytes at EOF", evbuffer_get_length(in));
 
 		_ws_read_websocket(ws, in);
 	}
@@ -848,9 +896,9 @@ static void _ws_eof_event(struct bufferevent *bev, short events, void *ptr)
 	if (ws->close_cb)
 	{
 		LIBWS_LOG(LIBWS_DEBUG, "Call close callback");
-
-		ws->close_cb(ws, 
+                ws->close_cb(ws,
 			status,
+                        WS_ERRTYPE_PROTOCOL,
 			ws->server_reason,
 			ws->server_reason_len,
 			ws->close_arg);
@@ -870,7 +918,7 @@ static void _ws_error_event(struct bufferevent *bev, short events, void *ptr)
 
 	LIBWS_LOG(LIBWS_DEBUG, "Error raised");
 
-	if (ws->state == WS_STATE_DNS_LOOKUP)
+        if (ws->state == WS_STATE_CONNECTING)
 	{
 		err = bufferevent_socket_get_dns_error(ws->bev);
 		err_msg = evutil_gai_strerror(err);
@@ -879,36 +927,23 @@ static void _ws_error_event(struct bufferevent *bev, short events, void *ptr)
 	}
 	else
 	{
-		err = EVUTIL_SOCKET_ERROR();
-		err_msg = evutil_socket_error_to_string(err);
+            // See if the server closed on us.
+            _ws_read_websocket(ws, bufferevent_get_input(ws->bev));
+            if (!ws->received_close)
+            {
+                ws->server_close_status = WS_CLOSE_STATUS_ABNORMAL_1006;
+            }
 
-		LIBWS_LOG(LIBWS_ERR, "%s (%d)", err_msg, err);
+            err = EVUTIL_SOCKET_ERROR();
+            err_msg = evutil_socket_error_to_string(err);
+            LIBWS_LOG(LIBWS_ERR, "Bufferevent error: %s (%d)", err_msg, err);
+        }
 
-		// See if the serve closed on us.
-		_ws_read_websocket(ws, bufferevent_get_input(ws->bev));
-
-		if (!ws->received_close)
-		{
-			ws->server_close_status = WS_CLOSE_STATUS_ABNORMAL_1006;
-		}
-
-		if (ws->close_cb)
-		{
-			LIBWS_LOG(LIBWS_ERR, "Abnormal close by server");
-			ws->close_cb(ws, ws->server_close_status, 
-				err_msg, strlen(err_msg), ws->close_arg);
-		}
-	}
-
-	// TODO: Should there even be an erro callback?
-	if (ws->err_cb)
-	{
-		ws->err_cb(ws, err, err_msg, ws->err_arg);
-	}
-	else
-	{
-		_ws_shutdown(ws);
-	}
+        if (ws->close_cb)
+        {
+            ws->close_cb(ws, err, WS_ERRTYPE_LIB, err_msg, strlen(err_msg), ws->close_arg);
+        }
+        _ws_shutdown(ws);
 }
 
 ///
@@ -917,41 +952,47 @@ static void _ws_error_event(struct bufferevent *bev, short events, void *ptr)
 ///
 void ws_event_callback(struct bufferevent *bev, short events, void *ptr)
 {
-	ws_t ws = (ws_t)ptr;
-	assert(ws);
+    ws_t ws = (ws_t)ptr;
+    assert(ws);
+    if (ws->state == WS_STATE_DESTROYING)
+    {
+        LIBWS_LOG(LIBWS_DEBUG, "Event callback called, but we are being destroyed. Ignoring");
+        return;
+    }
 
-	if (events & BEV_EVENT_CONNECTED)
-	{
-		_ws_connected_event(bev, events, ws);
-		return;
-	}
+    if (events & BEV_EVENT_CONNECTED)
+    {
+        _ws_connected_event(bev, events, ws);
+    }
 
-	if (events & BEV_EVENT_EOF)
-	{
-		_ws_eof_event(bev, events, ws);
-		return;
-	}
+    else if (events & BEV_EVENT_EOF)
+    {
+        _ws_eof_event(bev, events, ws);
+    }
+    else if (events & BEV_EVENT_ERROR)
+    {
+        _ws_error_event(bev, events, ws);
+    }
 
-	if (events & BEV_EVENT_ERROR)
-	{
-		_ws_error_event(bev, events, ws);
-		return;
-	}
+    else if (events & BEV_EVENT_TIMEOUT)
+    {
+        if (ws->close_cb)
+        {
+            char msg[] = "I/O timeout";
+            ws->close_cb(ws, ETIMEDOUT, WS_ERRTYPE_LIB, msg, sizeof(msg)-1, ws->close_arg);
+            LIBWS_LOG(LIBWS_DEBUG, "Bufferevent timeout");
+        }
+    }
 
-	if (events & BEV_EVENT_TIMEOUT)
-	{
-		LIBWS_LOG(LIBWS_DEBUG, "Bufferevent timeout");
-	}
+    if (events & BEV_EVENT_WRITING)
+    {
+        LIBWS_LOG(LIBWS_DEBUG, "   Writing");
+    }
 
-	if (events & BEV_EVENT_WRITING)
-	{
-		LIBWS_LOG(LIBWS_DEBUG, "   Writing");
-	}
-
-	if (events & BEV_EVENT_READING)
-	{
-		LIBWS_LOG(LIBWS_DEBUG, "   Reading");
-	}
+    if (events & BEV_EVENT_READING)
+    {
+        LIBWS_LOG(LIBWS_DEBUG, "   Reading");
+    }
 }
 
 int _ws_create_bufferevent_socket(ws_t ws)
@@ -982,12 +1023,12 @@ int _ws_create_bufferevent_socket(ws_t ws)
 			goto fail;
 		}
 	}
-#ifdef LIBWS_MULTITHREADED
-        assert(base->marshall_read_cb && base->marshall_write_cb && base->marshall_event_cb);
-        bufferevent_setcb(ws->bev, base->marshall_read_cb, base->marshall_write_cb,
+#ifdef LIBWS_EXTERNAL_LOOP
+        assert(base->marshall_read_cb && base->marshall_event_cb && base->marshall_timer_cb);
+        bufferevent_setcb(ws->bev, base->marshall_read_cb, NULL,
                           base->marshall_event_cb, (void*)ws);
 #else
-        bufferevent_setcb(ws->bev, ws_read_callback, ws_write_callback,
+        bufferevent_setcb(ws->bev, ws_read_callback, NULL,
                           ws_event_callback, (void*)ws);
 #endif
 	return ret;
@@ -1155,34 +1196,39 @@ void _ws_shutdown(ws_t ws)
 
 void _ws_close_timeout_cb(evutil_socket_t fd, short what, void *arg)
 {
-	ws_t ws = (ws_t)arg;
-	assert(ws);
+    LIBWS_LOG(LIBWS_TRACE, "Close timeout");
+    ws_t ws = (ws_t)arg;
+    assert(ws);
+    if (ws->state != WS_STATE_CLOSING)
+    {
+        LIBWS_LOG(LIBWS_ERR, "Close timeout callback called, but socket is not in closing state (state = %d)", ws->state);
+        return;
+    }
 
-	LIBWS_LOG(LIBWS_TRACE, "Close timeout");
+    // This callback should only ever be called after sending a close frame.
+    assert(ws->sent_close);
 
-	// This callback should only ever be called after sending a close frame.
-	assert(ws->sent_close);
+    // We sent a close frame to the server but it hasn't initiated
+    // the TCP close.
+    if (ws->received_close)
+    {
+        LIBWS_LOG(LIBWS_ERR, "Timeout! Server sent a Websocket close frame but did not close the TCP session");
+    }
+    else
+    {
+        LIBWS_LOG(LIBWS_ERR, "Timeout! Server did not reply to Websocket close frame");
+    }
 
-	// We sent a close frame to the server but it hasn't initiated
-	// the TCP close.
-	if (ws->received_close)
-	{
-		LIBWS_LOG(LIBWS_ERR, "Timeout! Server sent a Websocket close frame "
-							 "but did not close the TCP session");
-	}
-	else
-	{
-		LIBWS_LOG(LIBWS_ERR, "Timeout! Server did not reply to Websocket "
-							 "close frame");
-	}
-
-	LIBWS_LOG(LIBWS_ERR, "Initiating an unclean close");
-
-	_ws_shutdown(ws);
+    LIBWS_LOG(LIBWS_ERR, "Initiating an unclean close");
+    if (ws->close_cb)
+    {
+        char msg[] = "Timed out waiting for server-side close frame or TCP connection close";
+        ws->close_cb(ws, ETIMEDOUT, WS_ERRTYPE_PROTOCOL, msg, sizeof(msg)-1, ws->close_arg);
+    }
+    _ws_shutdown(ws);
 }
 
-int _ws_send_close(ws_t ws, ws_close_status_t status_code, 
-					const char *reason, size_t reason_len)
+int _ws_send_close(ws_t ws, ws_close_status_t status_code, const char *reason, size_t reason_len)
 {
 	char close_payload[WS_CONTROL_MAX_PAYLOAD_LEN];
 	assert(ws);
@@ -1255,15 +1301,4 @@ void _ws_set_timeouts(ws_t ws)
 	// events when you don’t want them.)
 
 	bufferevent_set_timeouts(ws->bev, &ws->recv_timeout, &ws->send_timeout);
-}
-
-void _ws_destroy_event(struct event **event)
-{
-	assert(event);
-
-	if (*event)
-	{
-		event_free(*event);
-		*event = NULL;
-	}
 }

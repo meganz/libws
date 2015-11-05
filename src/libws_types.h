@@ -26,9 +26,9 @@ typedef struct ws_base_s
     struct event_base *ev_base;  ///< Libevent event base.
     struct evdns_base *dns_base; ///< Libevent DNS base.
 
-#ifdef LIBWS_MULTITHREADED
+#ifdef LIBWS_EXTERNAL_LOOP
     bufferevent_data_cb marshall_read_cb;
-    bufferevent_data_cb marshall_write_cb;
+//  bufferevent_data_cb marshall_write_cb; currently not needed
     bufferevent_event_cb marshall_event_cb;
     event_callback_fn marshall_timer_cb;
 #endif
@@ -135,7 +135,7 @@ typedef enum ws_close_status_e
 	/// applications expecting a status code to indicate that the
 	/// connection was closed due to a failure to perform a TLS handshake
 	/// (e.g., the server certificate can't be verified).
-	WS_CLOSE_STATUS_FAILED_TLS_HANDSHAKE_1015 = 1015
+        WS_CLOSE_STATUS_FAILED_TLS_HANDSHAKE_1015 = 1015
 } ws_close_status_t;
 
 #define WS_IS_CLOSE_STATUS_NOT_USED(code) \
@@ -200,6 +200,12 @@ typedef enum ws_close_status_e
 	|| (code == WS_CLOSE_STATUS_EXTENSION_NOT_NEGOTIATED_1010) \
 	|| (code == WS_CLOSE_STATUS_UNEXPECTED_CONDITION_1011))
 
+enum
+{
+    WS_ERRTYPE_PROTOCOL,
+    WS_ERRTYPE_LIB
+};
+
 #define WS_MAX_PAYLOAD_LEN 0x7FFFFFFFFFFFFFFF
 #define WS_CONTROL_MAX_PAYLOAD_LEN 125
 
@@ -254,12 +260,12 @@ typedef struct ws_header_s
 typedef enum ws_state_e
 {
 	WS_STATE_DNS_LOOKUP,
-	WS_STATE_CLOSING,
-	WS_STATE_CLOSING_UNCLEANLY,
-	WS_STATE_CLOSED_CLEANLY,
-	WS_STATE_CLOSED_UNCLEANLY,
 	WS_STATE_CONNECTING,
-	WS_STATE_CONNECTED
+        WS_STATE_CONNECTED,
+        WS_STATE_CLOSING,
+        WS_STATE_CLOSED_CLEANLY,
+        WS_STATE_CLOSED_UNCLEANLY,
+        WS_STATE_DESTROYING
 } ws_state_t;
 
 typedef enum ws_parse_state_e
@@ -281,7 +287,7 @@ typedef enum libws_ssl_state_e
 
 #define WS_RANDOM_PATH "/dev/urandom"
 
-#ifdef LIBWS_MULTITHREADED
+#ifdef LIBWS_EXTERNAL_LOOP
 /// If we are using timer callback marshalling, we need to save the actual callback pointer somewhere,
 /// so that the marshaller knows what to call. So, we put all info in a structure that contains also
 /// the libevent timer event itself, and the callback argument. We don't contain the event struct
@@ -294,6 +300,7 @@ typedef struct ws_timer_s
     ws_t ws;
     event_callback_fn handler;
     struct event* evtimer;
+    int canceled;
 } ws_timer_s;
 
 typedef struct ws_timer_s* ws_timer;
@@ -302,30 +309,22 @@ typedef struct ws_timer_s* ws_timer;
     typedef struct event* ws_timer;
 #endif
 
-typedef void (*ws_msg_callback_f)(ws_t ws, char *msg, uint64_t len,
-			int binary, void *arg);
+typedef void (*ws_msg_callback_f)(ws_t ws, char *msg, uint64_t len, int binary, void *arg);
 
 typedef void (*ws_msg_begin_callback_f)(ws_t ws, void *arg);
-typedef void (*ws_msg_frame_callback_f)(ws_t ws, char *payload, 
-										uint64_t len, void *arg);
+typedef void (*ws_msg_frame_callback_f)(ws_t ws, char *payload, uint64_t len, void *arg);
 typedef void (*ws_msg_end_callback_f)(ws_t ws, void *arg);
 
 typedef void (*ws_msg_frame_begin_callback_f)(ws_t ws, void *arg);
-typedef void (*ws_msg_frame_data_callback_f)(ws_t ws, char *payload,
-											uint64_t len, void *arg);
+typedef void (*ws_msg_frame_data_callback_f)(ws_t ws, char *payload, uint64_t len, void *arg);
 typedef void (*ws_msg_frame_end_callback_f)(ws_t ws, void *arg);
 
-typedef void (*ws_err_callback_f)(ws_t ws, int errcode,
-								const char *errmsg, void *arg);
-typedef void (*ws_close_callback_f)(ws_t ws, ws_close_status_t status,
-				const char *reason, size_t reason_len, void *arg);
+typedef void (*ws_close_callback_f)(ws_t ws, int code, int type,
+                                const char *msg, size_t msg_len, void *arg);
 typedef void (*ws_connect_callback_f)(ws_t ws, void *arg);
-typedef void (*ws_timeout_callback_f)(ws_t ws,
-				struct timeval timeout, void *arg);
-typedef void (*ws_no_copy_cleanup_f)(ws_t ws, const void *data,
-						uint64_t datalen, void *extra);
-typedef int (*ws_header_callback_f)(ws_t ws, const char *header_name,
-				const char *header_val, void *arg);
+typedef void (*ws_timeout_callback_f)(ws_t ws, struct timeval timeout, void *arg);
+typedef void (*ws_no_copy_cleanup_f)(ws_t ws, const void *data, uint64_t datalen, void *extra);
+typedef int (*ws_header_callback_f)(ws_t ws, const char *header_name, const char *header_val, void *arg);
 
 typedef void *(*ws_malloc_replacement_f)(size_t bytes);
 typedef void (*ws_free_replacement_f)(void *ptr);

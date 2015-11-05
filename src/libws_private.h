@@ -33,7 +33,7 @@
 #include <event2/bufferevent_ssl.h>
 #endif // LIBWS_WITH_OPENSSL
 
-#ifdef LIBWS_MULTITHREADED
+#ifdef LIBWS_EXTERNAL_LOOP
 //The option to add to bufferevent creation to enable thread safety of bufferevent
     #define _LIBWS_LE2_OPT_THREADSAFE BEV_OPT_THREADSAFE
 #else
@@ -115,10 +115,6 @@ typedef struct ws_s
                                 ///< Callback for when a frame ends.
     void *msg_frame_end_arg;    ///< User supplied argument for
                                 /// the ws_s#msg_frame_end_cb.
-    ws_err_callback_f err_cb;   ///< Callback for when an error occurs on 
-                                /// the websocket connection.
-    void *err_arg;              ///< The user supplied argument
-                                /// to pass to the ws_s#error_cb callback.
     ws_close_callback_f close_cb;
                                 ///< Callback for when the websocket connection
                                 /// is closed.
@@ -260,10 +256,15 @@ typedef struct ws_s
 int _ws_setup_timeout_event(ws_t ws, event_callback_fn func, ws_timer* timer, struct timeval *tv);
 
 ///
-/// Frees and NULLs an timer.
-///
+/// Frees and NULLs an timer - asynchronously (i.e. just marks it as canceled - when it triggers,
+/// the callback deletes it) if LIBWS_EXTERNAL_LOOP is enabled,
+/// and synchronously otherwise.
 void _ws_free_timer(ws_timer *timer);
 
+/// Synchronously frees a timer - always performs the actual deletion immediately. Not to be used
+/// directly on a registered timer when LIBWS_EXTERNAL_LOOP, as if the timer has already fired and
+/// its message is queued on the marshalled, when its received the timer struct will be already freed
+void _ws_do_free_timer(ws_timer* timer);
 ///
 /// Creates a timeout event for when connecting.
 ///

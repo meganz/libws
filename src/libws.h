@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
-
+#ifndef LIBWS_EXTERNAL_LOOP
 ///
 /// Initializes the global context for the library that's common
 /// for all connections.
@@ -19,6 +19,33 @@
 /// @returns            0 on success.
 ///
 int ws_global_init(ws_base_t *base);
+#else
+///
+/// Initializes the global context for the library that's common
+/// for all connections for use with an external libevent eventloop and dnsbase. Provides marshalling
+/// callbacks that support running the library in a thread different than the one that runs the eventloop.
+/// This is convenient when the eventloop is run in a worker thread to monitor for network events,
+/// and the library itself is run in the GUI thread for easy interaction with the GUI.
+/// @param[out]	base A pointer to a #ws_base_t to use as global context.
+/// @param evbase The external eventloop
+/// @param dnsbase The external dnsbase that will be used for name resolution
+/// @param marshall_read_cb A callback function that should forward the call to ws_read_callback()
+/// on the thread where the library code should be executed (normally the GUI thread).
+/// This callback is called by the thread where the eventloop runs. If ws_read_callback is passed here,
+/// then no marshalling will be done and the library will be executed in the thread where
+/// the libevent loop is run. If NULL is provided for this and the other two callbacks
+/// (but not only _some_ of them, which will result in an error), it is equivalent
+/// to passing the ws_xxx_callback functions directly, i.e. no marshalling will be done and the library
+/// will run in the libevent loop's thread
+/// @param marshall_event_cb Simliar to #marshall_read_cb, should forward the call to ws_read_callback
+/// @param marshall_timer_cb Similar #marshal_read_cb, should forward the call to ws_handle_marshall_timer_callback
+/// @returns            0 on success.
+///
+
+int ws_global_init(ws_base_t base, struct event_base* evbase, struct evdns_base* dnsbase,
+    bufferevent_data_cb marshall_read_cb, bufferevent_event_cb marshall_event_cb,
+    event_callback_fn marshall_timer_cb);
+#endif
 
 ///
 /// Destroys the global context of the library.
@@ -96,6 +123,9 @@ int ws_connect(ws_t ws, const char *server, int port, const char *uri);
 ///
 int ws_close(ws_t ws);
 
+///@brief Closes the socket immediately and uncleanly.
+void ws_close_immediately(ws_t ws);
+
 ///
 /// Closes the websocket connection, with a specified status code.
 ///
@@ -164,13 +194,14 @@ int ws_base_quit_delay(ws_base_t base, int let_running_events_complete,
 ///
 int ws_base_quit(ws_base_t base, int let_running_events_complete);
 
-#ifdef LIBWS_MULTITHREADED
+#ifdef LIBWS_EXTERNAL_LOOP
 /// Expose the internal libevent callbacks as we will need to call them on another thread by the
 /// marshalling mechanism of the application
 ///
 void ws_read_callback(struct bufferevent *bev, void *ptr);
 void ws_write_callback(struct bufferevent *bev, void *ptr);
 void ws_event_callback(struct bufferevent *bev, short events, void *ptr);
+void ws_handle_marshall_timer_cb(int fd, short events, void* userp);
 #endif
 
 ///
@@ -521,17 +552,6 @@ void ws_set_onmsg_frame_end_cb(ws_t ws, ws_msg_frame_end_callback_f func,
 
 /// @}
 /// @}
-
-///
-/// Sets the on error callback function.
-///
-/// @param[in]	ws 		The websocket session context.
-/// @param[in]	func 	The callback function.
-/// @param[in]	arg		User context passed to the callback.
-///
-/// @returns			0 on success.
-/// 
-void ws_set_onerr_cb(ws_t ws, ws_err_callback_f func, void *arg);
 
 ///
 /// Sets the on close callback function.
