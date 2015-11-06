@@ -764,7 +764,7 @@ void ws_set_no_copy_cb(ws_t ws, ws_no_copy_cleanup_f func, void *extra);
 ///
 /// @param[in]	ws 	The websocket context.
 ///
-ws_state_t ws_get_state(ws_t ws);
+int ws_get_state(ws_t ws);
 
 ///
 /// Masks a given payload.
