@@ -238,15 +238,14 @@ add_library(ws STATIC
 			${HDRS_PRIVATE})
 
 # Add libs and dependencies
-add_dependencies(ws ${LIBWS_DEP_LIST})
 target_link_libraries(ws ${LIBWS_LIB_LIST})
-
-if (LIBWS_WITH_EXAMPLES AND NOT LIBWS_EXTERNAL_LOOP)
+if (NOT LIBWS_EXTERNAL_LOOP)
+    if (LIBWS_WITH_EXAMPLES)
 	add_executable(echo_client examples/echo_client/echo_client.c)
 	target_link_libraries(echo_client ws)
-endif()
+    endif()
 
-if (LIBWS_WITH_AUTOBAHN)
+    if (LIBWS_WITH_AUTOBAHN)
 	if (NOT EXISTS "${PROJECT_SOURCE_DIR}/test/autobahn/cargo/cargo.c")
 		message("####################################################")
 		message(" Please do 'git submodule update --init --recursive'")
@@ -269,18 +268,14 @@ if (LIBWS_WITH_AUTOBAHN)
 	include_directories(test)
 
 	target_link_libraries(autobahntest ws ${JANSSON_LIBRARIES})
-endif()
+    endif()
 
-if (LIBWS_WITH_TESTS AND NOT LIBWS_EXTERNAL_LOOP)
+    if (LIBWS_WITH_TESTS)
 	ENABLE_TESTING()
 	add_subdirectory(test)
+    endif()
 endif()
 
 # TODO: Create CMake config.
 # TODO: Export libraries and headers.
 # TODO: Install stuff
-
-message("=====================================================================")
-message("Libevent library: ${LIBEVENT_LIBRARIES}")
-message("Libevent include: ${LIBEVENT_INCLUDE_DIRS}")
-message("=====================================================================")

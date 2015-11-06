@@ -11,6 +11,11 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <inttypes.h>
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+}
 #ifndef LIBWS_EXTERNAL_LOOP
 ///
 /// Initializes the global context for the library that's common
@@ -852,6 +857,8 @@ const char *ws_parse_state_to_string(ws_parse_state_t state);
 ///
 void ws_set_rate_limits(ws_t ws, size_t read_rate, size_t read_burst, 
 						size_t write_rate, size_t write_burst);
-
+#ifdef __cplusplus
+}
+#endif
 #endif // __LIBWS_H__
 
