@@ -1428,9 +1428,11 @@ void ws_set_rate_limits(ws_t ws, size_t read_rate, size_t read_burst,
 
 	// Create a rate limiting token bucket.
 	tv.tv_sec = 1;
-	ws->rate_limits = ev_token_bucket_cfg_new(read_rate, read_burst, 
-											  write_rate, write_burst, &tv);
-
+        ws->rate_limits = ev_token_bucket_cfg_new(read_rate, read_burst,  write_rate, write_burst, &tv);
 
 }
 
+int ws_get_state(ws_t ws)
+{
+    return ws->state;
+}
