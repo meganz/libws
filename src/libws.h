@@ -15,7 +15,7 @@
 extern "C"
 {
 #endif
-}
+
 #ifndef LIBWS_EXTERNAL_LOOP
 ///
 /// Initializes the global context for the library that's common
