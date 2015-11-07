@@ -329,6 +329,7 @@ void
 	_ws_free(w);
 	*ws = NULL;
 }
+
 #ifdef LIBWS_EXTERNAL_LOOP
 
 ///destroy the ws_t object upon receiving the async destroy message
