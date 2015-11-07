@@ -351,6 +351,7 @@ void ws_destroy(ws_t *ws)
     timer->ws = *ws;
     timer->canceled = 0;
     (*ws)->ws_base->marshall_timer_cb(0, EV_TIMEOUT, timer);
+    *ws = NULL;
 }
 #endif
 
