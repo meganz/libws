@@ -918,12 +918,10 @@ static void _ws_error_event(struct bufferevent *bev, short events, void *ptr)
 
 	LIBWS_LOG(LIBWS_DEBUG, "Error raised");
 
-        if (ws->state == WS_STATE_CONNECTING)
-	{
-		err = bufferevent_socket_get_dns_error(ws->bev);
-		err_msg = evutil_gai_strerror(err);
-
-		LIBWS_LOG(LIBWS_ERR, "DNS error %d: %s", err, err_msg);
+        if ((ws->state == WS_STATE_CONNECTING) && ((err = bufferevent_socket_get_dns_error(ws->bev))))
+        {
+            err_msg = evutil_gai_strerror(err);
+            LIBWS_LOG(LIBWS_ERR, "DNS error %d: %s", err, err_msg);
 	}
 	else
 	{

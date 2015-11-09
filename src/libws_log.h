@@ -5,6 +5,10 @@
 #include "libws_config.h"
 #include <stdarg.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define LIBWS_NONE		(0 << 0)
 #define LIBWS_CRIT		(1 << 0)
 #define LIBWS_ERR		(1 << 1)
@@ -55,5 +59,9 @@ void ws_default_log_cb(int prio, const char *file,
 	const char *func, int line, const char *fmt, va_list args);
 
 const char *ws_log_get_prio_str(int prio);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // __LIBWS_LOG_H__
