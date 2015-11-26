@@ -922,6 +922,10 @@ static void _ws_error_event(struct bufferevent *bev, short events, void *ptr)
         {
             err_msg = evutil_gai_strerror(err);
             LIBWS_LOG(LIBWS_ERR, "DNS error %d: %s", err, err_msg);
+            if (ws->close_cb)
+            {
+                ws->close_cb(ws, err, WS_ERRTYPE_DNS, err_msg, strlen(err_msg), ws->close_arg);
+            }
 	}
 	else
 	{
@@ -935,12 +939,12 @@ static void _ws_error_event(struct bufferevent *bev, short events, void *ptr)
             err = EVUTIL_SOCKET_ERROR();
             err_msg = evutil_socket_error_to_string(err);
             LIBWS_LOG(LIBWS_ERR, "Bufferevent error: %s (%d)", err_msg, err);
+            if (ws->close_cb)
+            {
+                ws->close_cb(ws, err, WS_ERRTYPE_LIB, err_msg, strlen(err_msg), ws->close_arg);
+            }
         }
 
-        if (ws->close_cb)
-        {
-            ws->close_cb(ws, err, WS_ERRTYPE_LIB, err_msg, strlen(err_msg), ws->close_arg);
-        }
         _ws_shutdown(ws);
 }
 

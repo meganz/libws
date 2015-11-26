@@ -203,7 +203,8 @@ typedef enum ws_close_status_e
 enum
 {
     WS_ERRTYPE_PROTOCOL,
-    WS_ERRTYPE_LIB
+    WS_ERRTYPE_LIB,
+    WS_ERRTYPE_DNS //we need specific DNS type as we may want to re-parse resolv.conf in case internet was not active upon app startup
 };
 
 #define WS_MAX_PAYLOAD_LEN 0x7FFFFFFFFFFFFFFF
