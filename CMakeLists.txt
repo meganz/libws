@@ -1,27 +1,17 @@
 cmake_minimum_required (VERSION 2.6) 
 
 project(libws)
-
-set(PROJECT_MAJOR_VERSION 0)
-set(PROJECT_MINOR_VERSION 1)
-set(PROJECT_PATCH_VERSION 0)
+set(PROJECT_VERSION 0.2.0)
 
 option(LIBWS_WITH_TESTS "Build test suite" OFF)
 option(LIBWS_WITH_OPENSSL "Compile with OpenSSL support" ON)
 option(LIBWS_WITH_LOG "Compile with logging support" ON)
-option(LIBWS_WITH_MEMCHECK "Run valgrind on tests" OFF)
 option(LIBWS_WITH_EXAMPLES "Compile with example programs" OFF)
-option(LIBWS_WITH_AUTOBAHN "Compile the Autobahn test suite client. This requires extra dependencies." OFF)
 option(LIBWS_EXTERNAL_LOOP "Support marshalling of libevent callbacks")
 
-set(PROJECT_VERSION ${PROJECT_MAJOR_VERSION}.${PROJECT_MINOR_VERSION}.${PROJECT_PATCH_VERSION})
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/CMakeModules)
+find_package(Libevent REQUIRED)
 
-include(CheckCSourceCompiles)
-include(CheckFunctionExists)
-include(CheckIncludeFiles)
-include(CheckSymbolExists)
-include(CheckTypeSize)
 
 # Set some nicer output dirs.
 SET(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
@@ -29,32 +19,7 @@ SET(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 SET(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 
 if(${CMAKE_C_COMPILER_ID} STREQUAL "GNU" OR ${CMAKE_C_COMPILER_ID} STREQUAL "Clang")
-	# Aim for C89 with C++ style comments.
-	set(CMAKE_CXX_FLAGS "-Wimplicit-function-declaration")
-	set(CMAKE_C_FLAGS "-std=gnu89 -Wimplicit-function-declaration -Wpointer-sign")
-
-	# Turn on coverage support.
-	option(LIBWS_COVERAGE "Compile with coverage flags.")
-	option(LIBWS_COVERAGE_REPORT "(GCC Only! Requires gcov/lcov to be installed). Include target for doing coverage analysis for the test suite. Note that -DCMAKE_BUILD_TYPE=Debug must be set" OFF)
-
-	if (LIBWS_COVERAGE_REPORT)
-		set(LIBWS_COVERAGE ON)
-	endif()
-endif()
-
-if (LIBWS_COVERAGE)
-	if(NOT CMAKE_COMPILER_IS_GNUCXX)
-		if (NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-			message(FATAL_ERROR "Compiler is not GNU gcc! Aborting... You can set this on the command line using CC=/usr/bin/gcc CXX=/usr/bin/g++ cmake <options> ..")
-		endif()
-	endif()
-
-	if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-	  MESSAGE(FATAL_ERROR "Code coverage results with an optimised (non-Debug) build may be misleading! Add -DCMAKE_BUILD_TYPE=Debug")
-	endif()
-
-	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -fprofile-arcs -ftest-coverage")
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0 -fprofile-arcs -ftest-coverage")
+    add_definitions("-Wall")
 endif()
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
@@ -64,12 +29,8 @@ if (WIN32)
 	list(APPEND LIBWS_LIB_LIST Ws2_32.lib iphlpapi.lib User32.lib)
 endif()
 
-find_package(Libevent REQUIRED)
 
 include_directories(${LIBEVENT_INCLUDE_DIRS})
-
-list(APPEND LIBWS_DEP_LIST Libevent)
-list(APPEND LIBWS_LIB_LIST ${LIBEVENT_LIBRARIES})
 
 if (LIBWS_WITH_OPENSSL)
 	find_package(OpenSSL REQUIRED)
@@ -88,99 +49,25 @@ endif(LIBWS_WITH_OPENSSL)
 ################################################################################
 ###                        System introspection                              ###
 ################################################################################
+# //Old MSVC not supported
+set(LIBWS_HAVE_STDINT_H 1)
+set(LIBWS_HAVE_SYS_TYPES_H 1)
+set(LIBWS_HAVE_INTTYPES_H 1)
+set(LIBWS_UINT32 uint32_t)
+set(LIBWS_UINT64 uint64_t)
+set(LIBWS_U64FMT "PRIu64")
 
-check_include_files(unistd.h LIBWS_HAVE_UNISTD_H)
-check_include_files(sys/socket.h LIBWS_HAVE_SYS_SOCKET_H)
-check_include_files(sys/time.h LIBWS_HAVE_SYS_TIME_H)
-check_include_files(stdint.h LIBWS_HAVE_STDINT_H)
-check_include_files(inttypes.h LIBWS_HAVE_INTTYPES_H)
-check_include_files(sys/types.h LIBWS_HAVE_SYS_TYPES_H)
-
-# Look for 64-bit integer sizes.
-check_type_size(__uint64 LIBWS_HAVE___UINT64)
-check_type_size(uint64_t LIBWS_HAVE_UINT64_T)
-check_type_size("unsigned long long" LIBWS_HAVE_UNSIGNED_LONG_LONG_INT)
-check_type_size("unsigned long" LIBWS_HAVE_UNSIGNED_LONG_INT)
-check_type_size("unsigned int" LIBWS_HAVE_UNSIGNED_INT)
-
-# Check our unsigned 32 bit integer sizes.
-check_type_size(uint32_t LIBWS_HAVE_UINT32_T)
-check_type_size(__uint32 LIBWS_HAVE___UINT32)
-
-if (LIBWS_HAVE_UINT32_T)
-	set(LIBWS_UINT32 uint32_t)
-elseif (LIBWS_HAVE___UINT32)
-	set(LIBWS_UINT32 __uint32)
-elseif (LIBWS_HAVE_UNSIGNED_LONG_INT 
-		AND (${LIBWS_HAVE_UNSIGNED_LONG_INT} EQUAL 4))
-	set(LIBWS_UINT32 "unsigned long")
-elseif (LIBWS_HAVE_UNSIGNED_INT AND (${LIBWS_HAVE_UNSIGNED_INT} EQUAL 4))
-	set(LIBWS_UINT32 "unsigned int")
+if (NOT WIN32)
+    set(IS_UNIX 1)
 else()
-	message(FATAL_ERROR "Could not detect a valid unsigned 32-bit integer type")
+    set(IS_UNIX 0)
 endif()
 
-# Check for 64-bit types and format string.
-check_symbol_exists("PRIu64" "inttypes.h" LIBWS_HAVE_PRIU64)
+set(LIBWS_HAVE_UNISTD_H ${IS_UNIX})
+set(LIBWS_HAVE_SYS_SOCKET_H ${IS_UNIX})
+set(LIBWS_HAVE_SYS_TIME_H ${IS_UNIX})
+set(LIBWS_INLINE inline)
 
-if (LIBWS_HAVE_UINT64_T)
-	set(LIBWS_UINT64 uint64_t)
-
-	if (LIBWS_HAVE_PRIU64)
-		set(LIBWS_U64FMT "PRIu64")
-	else()
-		set(LIBWS_U64FMT "\"llu\"")
-	endif()
-
-elseif (LIBWS_HAVE___UINT64)
-
-	set(LIBWS_UINT64 __uint64)
-	set(LIBWS_U64FMT "PRIu64")
-
-elseif (LIBWS_HAVE_UNSIGNED_LONG_LONG_INT
-		AND (${LIBWS_HAVE_UNSIGNED_LONG_LONG_INT} EQUAL 8))
-
-	set(LIBWS_UINT64 "unsigned long long")
-	set(LIBWS_U64FMT "\"llu\"")
-
-elseif (LIBWS_HAVE_UNSIGNED_LONG_INT
-		AND (${LIBWS_HAVE_UNSIGNED_LONG_INT} EQUAL 8))
-
-	set(LIBWS_UINT64 "unsigned long int")
-	set(LIBWS_U64FMT "\"lu\"")
-
-elseif (LIBWS_HAVE__UNSIGNED_INT
-		AND (${LIBWS_HAVE__UNSIGNED_INT} EQUAL 8))
-
-	set(LIBWS_UINT64 "unsigned long int")
-	set(LIBWS_U64FMT "\"u\"")
-
-else()
-	message(FATAL_ERROR "Could not detect a valid unsigned 64-bit integer type")
-endif()
-
-if (WIN32) # matches both msvc and cygwin
-	set(LIBWS_64FMT "\"I64u\"")
-endif()
-
-# Check for different inline keyword versions.
-foreach(KEYWORD "inline" "__inline__" "__inline")
-    set(CMAKE_REQUIRED_DEFINITIONS "-DKEYWORD=${KEYWORD}")
-    CHECK_C_SOURCE_COMPILES(
-        "
-        #include <stdio.h>
-        KEYWORD void a() {}
-        int main(int argc, char **argv) { a(); return 0; }
-        " LIBWS_HAVE_${KEYWORD})
-endforeach()
-
-if (NOT LIBWS_HAVE_inline)
-    if (LIBWS_HAVE___inline__)
-        set(LIBWS_INLINE __inline__)
-    elseif(LIBWS_HAVE___inline)
-        set(LIBWS_INLINE __inline)
-    endif()
-endif()
 set(CMAKE_REQUIRED_DEFINITIONS "")
 
 # Generate the config header file.
@@ -241,39 +128,14 @@ add_library(ws STATIC
 target_link_libraries(ws ${LIBWS_LIB_LIST})
 if (NOT LIBWS_EXTERNAL_LOOP)
     if (LIBWS_WITH_EXAMPLES)
-	add_executable(echo_client examples/echo_client/echo_client.c)
-	target_link_libraries(echo_client ws)
+        add_executable(echo_client examples/echo_client/echo_client.c)
+        target_link_libraries(echo_client ws)
     endif()
+endif()
 
-    if (LIBWS_WITH_AUTOBAHN)
-	if (NOT EXISTS "${PROJECT_SOURCE_DIR}/test/autobahn/cargo/cargo.c")
-		message("####################################################")
-		message(" Please do 'git submodule update --init --recursive'")
-		message("####################################################")
-		message(FATAL_ERROR "Missing submodules!")
-	endif()
-
-	set(JANSSON_WITHOUT_TESTS ON CACHE BOOL "")
-	set(JANSSON_BUILD_DOCS OFF CACHE BOOL "")
-	add_subdirectory(test/autobahn/jansson)
-	include_directories(${JANSSON_INCLUDE_DIRS})
-
-	# Uncomment this to get cargo debug info.
-	#add_definitions(-DCARGO_DEBUG=5)
-	add_executable(autobahntest
-		test/autobahn/autobahntest.c
-		test/autobahn/cargo/cargo.c
-		test/libws_test_helpers.c)
-
-	include_directories(test)
-
-	target_link_libraries(autobahntest ws ${JANSSON_LIBRARIES})
-    endif()
-
-    if (LIBWS_WITH_TESTS)
+if (LIBWS_WITH_TESTS)
 	ENABLE_TESTING()
 	add_subdirectory(test)
-    endif()
 endif()
 
 # TODO: Create CMake config.
