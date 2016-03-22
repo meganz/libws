@@ -28,9 +28,9 @@
 #  define uint64_t @LIBWS_UINT64@
 #endif
 
-#cmakedefine LIBWS_HAVE_PRIU64 1
-#ifndef LIBWS_HAVE_PRIU64
-#  define PRIu64 @LIBWS_HAVE_PRIU64@
+#cmakedefine LIBWS_U64FMT
+#if !defined(PRIu64) && defined(LIBWS_U64FMT)
+#  define PRIu64 LIBWS_U64FMT
 #endif
 
 // If your compiler supports the inline keyword in C, JSON_INLINE is
