@@ -308,11 +308,8 @@ int _ws_setup_connection_timeout(ws_t ws)
 
 static int _ws_handle_close_frame(ws_t ws)
 {
-	ws_header_t *h;
 	assert(ws);
 	LIBWS_LOG(LIBWS_TRACE, "Close frame");
-
-	h = &ws->header;
 
 	ws->server_close_status = (uint16_t)WS_CLOSE_STATUS_NORMAL_1000;
 	ws->server_reason = NULL;
@@ -335,11 +332,8 @@ static int _ws_handle_close_frame(ws_t ws)
 	{
 		if (ws->ctrl_len < 2)
 		{
-			LIBWS_LOG(LIBWS_ERR, "Close frame application data lacking "
-								 "status code");
-
+            LIBWS_LOG(LIBWS_ERR, "Close frame application data missing status code");
 			ws->server_close_status = WS_CLOSE_STATUS_STATUS_CODE_EXPECTED_1005;
-
 			ws_close_with_status(ws, WS_CLOSE_STATUS_PROTOCOL_ERR_1002);
 			return 0;
 		}
@@ -348,11 +342,20 @@ static int _ws_handle_close_frame(ws_t ws)
 			LIBWS_LOG(LIBWS_DEBUG, "Reading server close status and reason "
 					" (payload length %lu)", ws->ctrl_len);
 
+            const char* payload = ws->ctrl_payload;
+            //casting char* to uint16_t*, it breaks strict aliasing
 			ws->server_close_status = 
-				(ws_close_status_t)ntohs(*((uint16_t *)ws->ctrl_payload));
-			ws->server_reason = &ws->ctrl_payload[2];
-			ws->server_reason_len = ws->ctrl_len - 2;
-			ws->server_reason[ws->server_reason_len] = '\0';
+                (ws_close_status_t)ntohs((((uint16_t)(payload[0])) << 8) + payload[1]);
+            if (ws->ctrl_len > 2)
+            {
+                ws->server_reason = &ws->ctrl_payload[2];
+                ws->server_reason_len = ws->ctrl_len - 2;
+                ws->server_reason[ws->server_reason_len] = '\0';
+            }
+            else
+            {
+                ws->server_reason = NULL;
+            }
 
 			LIBWS_LOG(LIBWS_INFO, "Got close status %d, \"%s\"", 
 				ws->server_close_status, 
@@ -1252,8 +1255,9 @@ int _ws_send_close(ws_t ws, ws_close_status_t status_code, const char *reason, s
 		return -1;
 	}
 
-	*((uint16_t *)close_payload) = htons((uint16_t)status_code);
-	memcpy(&close_payload[2], reason, reason_len);
+    uint16_t code = htons((uint16_t)status_code);
+    memcpy(close_payload, &code, sizeof(code));
+    memcpy(close_payload+2, reason, reason_len);
 
 	if (_ws_send_frame_raw(ws, WS_OPCODE_CLOSE_0X8, 
 							close_payload, reason_len + 2))

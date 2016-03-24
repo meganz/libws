@@ -364,8 +364,6 @@ ws_base_t ws_get_base(ws_t ws)
 
 int ws_connect(ws_t ws, const char *server, int port, const char *uri)
 {
-	int ret = 0;
-	struct evbuffer *out = NULL;
 	assert(ws);
 
 	LIBWS_LOG(LIBWS_DEBUG, "Connect start");
@@ -397,26 +395,21 @@ int ws_connect(ws_t ws, const char *server, int port, const char *uri)
 	if (_ws_create_bufferevent_socket(ws))
 	{
 		LIBWS_LOG(LIBWS_ERR, "Failed to create bufferevent socket");
-		ret = -1;
-		goto fail;
+        goto fail;
 	}
 
-	out = bufferevent_get_output(ws->bev);
-
-        ws->state = WS_STATE_CONNECTING;
-	if (bufferevent_socket_connect_hostname(ws->bev, 
-				ws->ws_base->dns_base, AF_UNSPEC, ws->server, ws->port))
-        {
-                LIBWS_LOG(LIBWS_ERR, "Immediate bufferevent_socket_connect_hostname failure");
-		ret = -1;
+    ws->state = WS_STATE_CONNECTING;
+    if (bufferevent_socket_connect_hostname(ws->bev, ws->ws_base->dns_base,
+        AF_UNSPEC, ws->server, ws->port))
+    {
+        LIBWS_LOG(LIBWS_ERR, "Immediate bufferevent_socket_connect_hostname failure");
 		goto fail;
-        }
+    }
 
 	// Setup a timeout event for the connection attempt.
 	if (_ws_setup_connection_timeout(ws))
 	{
 		LIBWS_LOG(LIBWS_ERR, "Failed to setup connection timeout event");
-		ret = -1;
 		goto fail;
 	}
 
@@ -1290,7 +1283,8 @@ void ws_default_msg_end_cb(ws_t ws, void *arg)
 	
 	// Finalize the message by adding a null char.
 	// TODO: No null for binary?
-	evbuffer_add_printf(ws->msg, "");
+    uint8_t zero = 0;
+    evbuffer_add(ws->msg, &zero, sizeof(zero));
 
 	len = evbuffer_get_length(ws->msg);
 	payload = evbuffer_pullup(ws->msg, len);

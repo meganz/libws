@@ -46,8 +46,7 @@ int _ws_generate_handshake_key(ws_t ws)
 
 int _ws_send_handshake(ws_t ws, struct evbuffer *out)
 {
-	size_t key_len = 0;
-	size_t i;
+    size_t i;
 	assert(ws);
 	assert(out);
 
@@ -162,9 +161,6 @@ int _ws_parse_http_status(const char *line,
 						int *http_major_version, int *http_minor_version,
 						int *status_code)
 {
-	const char *s = line;
-	int n;
-
 	*status_code = -1;
 	*http_major_version = -1;
 	*http_minor_version = -1;
@@ -172,7 +168,7 @@ int _ws_parse_http_status(const char *line,
 	if (!line)
 		return -1;
 
-	n = sscanf(line, "HTTP/%d.%d %d", 
+    int n = sscanf(line, "HTTP/%d.%d %d",
 		http_major_version, http_minor_version, status_code);
 
 	if (n != 3)
@@ -244,7 +240,6 @@ int _ws_check_server_protocol_list(ws_t ws, const char *val)
 	char *s = _ws_strdup(val);
 	char *v = s;
 	char *prot = NULL;
-	char *end = NULL;
 	int found = 0;
 	
 	while ((prot = libws_strsep(&v, ",")) != NULL)
@@ -536,9 +531,6 @@ ws_parse_state_t _ws_read_http_headers(ws_t ws, struct evbuffer *in)
 
 ws_parse_state_t _ws_read_server_handshake_reply(ws_t ws, struct evbuffer *in)
 {
-	char *line = NULL;
-	char *header_name = NULL;
-	char *header_val = NULL;
 	int major_version;
 	int minor_version;
 	int status_code;
