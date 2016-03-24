@@ -24,13 +24,15 @@ endif()
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
 
+set(LIBWS_LIB_LIST ${LIBEVENT_LIBRARIES})
+include_directories(${LIBEVENT_INCLUDE_DIRS})
+
 if (WIN32)
 	add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_DEPRECATE)
 	list(APPEND LIBWS_LIB_LIST Ws2_32.lib iphlpapi.lib User32.lib)
 endif()
 
 
-include_directories(${LIBEVENT_INCLUDE_DIRS})
 
 if (LIBWS_WITH_OPENSSL)
 	find_package(OpenSSL REQUIRED)
