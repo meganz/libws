@@ -28,13 +28,13 @@ char *_ws_get_time_str(char *buf, size_t bufsize)
 {
 	const char *fmt = "%Y-%m-%d %H:%M:%S";
 
-	#ifdef _WIN32
+#ifdef _WIN32
 	struct tm *now;
 	time_t timenow;
 	time(&timenow);
 	now = localtime(&timenow);
 	strftime(buf, bufsize, fmt, now);
-	#else
+#else
 	int ret = 0;
 	struct timeval now;
 	evutil_gettimeofday(&now, NULL);
@@ -43,7 +43,7 @@ char *_ws_get_time_str(char *buf, size_t bufsize)
 	{
         snprintf(&buf[ret], bufsize, ".%ld", now.tv_usec);
 	}
-	#endif
+#endif
 
 	return buf;
 }
