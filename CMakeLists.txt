@@ -7,7 +7,7 @@ option(LIBWS_WITH_TESTS "Build test suite" OFF)
 option(LIBWS_WITH_OPENSSL "Compile with OpenSSL support" ON)
 option(LIBWS_WITH_LOG "Compile with logging support" ON)
 option(LIBWS_WITH_EXAMPLES "Compile with example programs" OFF)
-option(LIBWS_EXTERNAL_LOOP "Support marshalling of libevent callbacks")
+option(LIBWS_EXTERNAL_LOOP "Support marshalling of libevent callbacks" ON)
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/CMakeModules)
 find_package(Libevent REQUIRED)
