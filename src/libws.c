@@ -228,11 +228,12 @@ int ws_global_init(ws_base_t base, struct event_base* evbase, struct evdns_base*
 void ws_global_destroy(ws_base_t *base)
 {
     assert(*base);
+#ifndef _WIN32
     if (close((*base)->random_fd))
     {
         LIBWS_LOG(LIBWS_ERR, "Failed to close random source: %s (%d)", strerror(errno), errno);
     }
-
+#endif
     _ws_free(*base);
 }
 #endif

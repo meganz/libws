@@ -29,9 +29,6 @@
 #endif
 
 #cmakedefine LIBWS_U64FMT
-#if !defined(PRIu64) && defined(LIBWS_U64FMT)
-#  define PRIu64 LIBWS_U64FMT
-#endif
 
 // If your compiler supports the inline keyword in C, JSON_INLINE is
 // defined to `inline', otherwise empty. In C++, the inline is always
