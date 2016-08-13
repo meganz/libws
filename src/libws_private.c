@@ -14,6 +14,7 @@
 #else
 #include <sys/time.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 #endif
 #include <string.h>
 
