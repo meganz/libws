@@ -5,16 +5,16 @@
 #include <assert.h>
 
 #ifdef WIN32
-#define _CRT_RAND_S
+  #define _CRT_RAND_S
 #include <stdlib.h>
 #endif
 
 #ifdef _WIN32
-#include <time.h>
+  #include <time.h>
 #else
-#include <sys/time.h>
-#include <unistd.h>
-#include <arpa/inet.h>
+  #include <sys/time.h>
+  #include <unistd.h>
+  #include <arpa/inet.h>
 #endif
 #include <string.h>
 
