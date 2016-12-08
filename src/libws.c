@@ -1275,20 +1275,12 @@ void ws_default_msg_frame_cb(ws_t ws, char *payload,
 
 void ws_default_msg_end_cb(ws_t ws, void *arg)
 {
-	size_t len;
-	unsigned char *payload;
 	assert(ws);
-
 	LIBWS_LOG(LIBWS_TRACE, "Default message end callback "
-							"(Calls the on message callback)");
-	
-	// Finalize the message by adding a null char.
-	// TODO: No null for binary?
-    uint8_t zero = 0;
-    evbuffer_add(ws->msg, &zero, sizeof(zero));
+                            "(Calls the on message callback)");
 
-	len = evbuffer_get_length(ws->msg);
-	payload = evbuffer_pullup(ws->msg, len);
+    size_t len = evbuffer_get_length(ws->msg);
+    unsigned char* payload = evbuffer_pullup(ws->msg, len);
 
 	LIBWS_LOG(LIBWS_DEBUG2, "Message received of length %lu:\n%s", len, payload);
 
