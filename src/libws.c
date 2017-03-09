@@ -363,7 +363,7 @@ ws_base_t ws_get_base(ws_t ws)
 	return ws->ws_base;
 }
 
-int ws_connect(ws_t ws, const char *server, int port, const char *uri)
+int ws_connect(ws_t ws, const char *server, int port, const char *uri, uint8_t ipv6)
 {
 	assert(ws);
 
@@ -401,7 +401,7 @@ int ws_connect(ws_t ws, const char *server, int port, const char *uri)
 
     ws->state = WS_STATE_CONNECTING;
     if (bufferevent_socket_connect_hostname(ws->bev, ws->ws_base->dns_base,
-        AF_UNSPEC, ws->server, ws->port))
+        ipv6 ? AF_INET6 : AF_INET, ws->server, ws->port))
     {
         LIBWS_LOG(LIBWS_ERR, "Immediate bufferevent_socket_connect_hostname failure");
 		goto fail;

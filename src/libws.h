@@ -115,7 +115,7 @@ ws_base_t ws_get_base(ws_t ws);
 ///
 /// @returns			0 on success.
 ///
-int ws_connect(ws_t ws, const char *server, int port, const char *uri);
+int ws_connect(ws_t ws, const char *server, int port, const char *uri, uint8_t ipv6);
 
 ///
 /// Closes the websocket connection with the "1000 normal closure" status.
