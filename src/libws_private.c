@@ -922,34 +922,36 @@ static void _ws_error_event(struct bufferevent *bev, short events, void *ptr)
 
 	LIBWS_LOG(LIBWS_DEBUG, "Error raised");
 
-        if ((ws->state == WS_STATE_CONNECTING) && ((err = bufferevent_socket_get_dns_error(ws->bev))))
+    if ((ws->state == WS_STATE_CONNECTING) && ((err = bufferevent_socket_get_dns_error(ws->bev))))
+    {
+        err_msg = evutil_gai_strerror(err);
+        LIBWS_LOG(LIBWS_ERR, "DNS error %d: %s", err, err_msg);
+        if (ws->close_cb)
         {
-            err_msg = evutil_gai_strerror(err);
-            LIBWS_LOG(LIBWS_ERR, "DNS error %d: %s", err, err_msg);
-            if (ws->close_cb)
-            {
-                ws->close_cb(ws, err, WS_ERRTYPE_DNS, err_msg, strlen(err_msg), ws->close_arg);
-            }
+            ws->close_cb(ws, err, WS_ERRTYPE_DNS, err_msg, strlen(err_msg), ws->close_arg);
+        }
 	}
 	else
-	{
-            // See if the server closed on us.
+    {
+        // See if the server closed on us.
+        if (ws->bev)
+        {
             _ws_read_websocket(ws, bufferevent_get_input(ws->bev));
             if (!ws->received_close)
             {
                 ws->server_close_status = WS_CLOSE_STATUS_ABNORMAL_1006;
             }
-
-            err = EVUTIL_SOCKET_ERROR();
-            err_msg = evutil_socket_error_to_string(err);
-            LIBWS_LOG(LIBWS_ERR, "Bufferevent error: %s (%d)", err_msg, err);
-            if (ws->close_cb)
-            {
-                ws->close_cb(ws, err, WS_ERRTYPE_LIB, err_msg, strlen(err_msg), ws->close_arg);
-            }
         }
 
-        _ws_shutdown(ws);
+        err = EVUTIL_SOCKET_ERROR();
+        err_msg = evutil_socket_error_to_string(err);
+        LIBWS_LOG(LIBWS_ERR, "Bufferevent error: %s (%d)", err_msg, err);
+        if (ws->close_cb)
+        {
+            ws->close_cb(ws, err, WS_ERRTYPE_LIB, err_msg, strlen(err_msg), ws->close_arg);
+        }
+    }
+    _ws_shutdown(ws);
 }
 
 ///
