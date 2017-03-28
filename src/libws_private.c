@@ -919,6 +919,11 @@ static void _ws_error_event(struct bufferevent *bev, short events, void *ptr)
 	int err;
 	ws_t ws = (ws_t)ptr;
 	assert(ws);
+    //libevent may send us EOF and then ERROR, in which case we have
+    //already shut down the connection, freed ws->bev, and called the close cb,
+    //so we should just ignore the ERROR event
+    if (!ws->bev)
+        return;
 
 	LIBWS_LOG(LIBWS_DEBUG, "Error raised");
 
@@ -934,15 +939,11 @@ static void _ws_error_event(struct bufferevent *bev, short events, void *ptr)
 	else
     {
         // See if the server closed on us.
-        if (ws->bev)
+        _ws_read_websocket(ws, bufferevent_get_input(ws->bev));
+        if (!ws->received_close)
         {
-            _ws_read_websocket(ws, bufferevent_get_input(ws->bev));
-            if (!ws->received_close)
-            {
-                ws->server_close_status = WS_CLOSE_STATUS_ABNORMAL_1006;
-            }
+            ws->server_close_status = WS_CLOSE_STATUS_ABNORMAL_1006;
         }
-
         err = EVUTIL_SOCKET_ERROR();
         err_msg = evutil_socket_error_to_string(err);
         LIBWS_LOG(LIBWS_ERR, "Bufferevent error: %s (%d)", err_msg, err);
