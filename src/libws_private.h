@@ -215,6 +215,7 @@ typedef struct ws_s
     int sent_close;             ///< Have we sent a close frame?
     ws_timer close_timeout_event;
                                 ///< Timeout even for waiting for a close reply.
+    ws_timer async_destroy_timer;
     ws_close_status_t server_close_status; 
                                 ///< The Close status the server sent.
     char *server_reason;        ///< Server close reason data.

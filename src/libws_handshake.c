@@ -10,6 +10,7 @@
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
 #include <assert.h>
+#include <string.h>
 
 int _ws_generate_handshake_key(ws_t ws)
 {

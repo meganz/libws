@@ -195,7 +195,7 @@ int _ws_setup_timeout_event(ws_t ws, event_callback_fn func, ws_timer* timer, st
             LIBWS_LOG(LIBWS_ERR, "Failed to allocate memory for ws_timer struct");
             return -1;
         }
-        if (!((*timer)->evtimer = evtimer_new(base->ev_base, base->marshall_timer_cb, (void*)*timer)))
+        if (!((*timer)->evtimer = evtimer_new(base->ev_base, base->marshall_timer_cb, (void*)timer)))
         {
             _ws_free(*timer);
             *timer = NULL;
@@ -227,7 +227,13 @@ int _ws_setup_timeout_event(ws_t ws, event_callback_fn func, ws_timer* timer, st
 #ifdef LIBWS_EXTERNAL_LOOP
 void ws_handle_marshall_timer_cb(int fd, short events, void* userp)
 {
-    ws_timer timer = (ws_timer)userp;
+    ws_timer* pTimer = (ws_timer*)userp;
+    ws_timer timer = *pTimer;
+    if (!timer) // timer was freed meanwhile
+    {
+        return;
+    }
+
     if (timer->ws->state == WS_STATE_DESTROYING)
     {
         //we should not schedule timers once we are being destroyed
@@ -237,7 +243,7 @@ void ws_handle_marshall_timer_cb(int fd, short events, void* userp)
     {
         timer->handler(fd, events, timer->ws);
     }
-    _ws_do_free_timer(&timer);
+    _ws_do_free_timer(pTimer);
 }
 
 /// This is called from within the timer handler, when the timer triggers.
@@ -254,6 +260,7 @@ inline void _ws_do_free_timer(ws_timer* timer)
         event_free(t->evtimer);
     }
     _ws_free(t);
+    *timer = NULL;
 }
 
 ///Destroy the timer asynchronously on LIBWS_EXTERNAL_LOOP enabled

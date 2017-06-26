@@ -347,12 +347,12 @@ void _ws_handle_async_destroy_msg(int fd, short events, void* userp)
 void ws_destroy(ws_t *ws)
 {
     (*ws)->state = WS_STATE_DESTROYING;
-    ws_timer timer = (ws_timer)_ws_malloc(sizeof(struct ws_timer_s));
+    ws_timer timer = (*ws)->async_destroy_timer = (ws_timer)_ws_malloc(sizeof(struct ws_timer_s));
     timer->handler = _ws_handle_async_destroy_msg;
     timer->evtimer = NULL;
     timer->ws = *ws;
     timer->canceled = 0;
-    (*ws)->ws_base->marshall_timer_cb(0, EV_TIMEOUT, timer);
+    (*ws)->ws_base->marshall_timer_cb(0, EV_TIMEOUT, &((*ws)->async_destroy_timer));
     *ws = NULL;
 }
 #endif
