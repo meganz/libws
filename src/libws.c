@@ -422,6 +422,65 @@ fail:
 	return -1;
 }
 
+int ws_connect_addr(ws_t ws, const char *server, struct sockaddr *addr, int addrlen, int port, const char *uri)
+{
+    assert(ws);
+    
+    LIBWS_LOG(LIBWS_DEBUG, "Connect start");
+    
+    if ((ws->state != WS_STATE_CLOSED_CLEANLY)
+        && (ws->state != WS_STATE_CLOSED_UNCLEANLY))
+    {
+        LIBWS_LOG(LIBWS_ERR, "Already connected, connecting or being destroyed");
+        return -1;
+    }
+    
+    if (!server)
+    {
+        LIBWS_LOG(LIBWS_ERR, "NULL server given");
+        return -1;
+    }
+    
+    if (ws->server) _ws_free(ws->server);
+    ws->server = _ws_strdup(server);
+    
+    if (ws->uri) _ws_free(ws->uri);
+    ws->uri = _ws_strdup(uri);
+    
+    ws->port = port;
+    ws->received_close = 0;
+    ws->sent_close = 0;
+    ws->in_msg = 0;
+    
+    if (_ws_create_bufferevent_socket(ws))
+    {
+        LIBWS_LOG(LIBWS_ERR, "Failed to create bufferevent socket");
+        goto fail;
+    }
+    
+    ws->state = WS_STATE_CONNECTING;
+    if (bufferevent_socket_connect(ws->bev, addr, addrlen))
+    {
+        LIBWS_LOG(LIBWS_ERR, "Immediate bufferevent_socket_connect_hostname failure");
+        goto fail;
+    }
+    
+    // Setup a timeout event for the connection attempt.
+    if (_ws_setup_connection_timeout(ws))
+    {
+        LIBWS_LOG(LIBWS_ERR, "Failed to setup connection timeout event");
+        goto fail;
+    }
+    
+    return 0;
+fail:
+    if (ws->server) _ws_free(ws->server);
+    if (ws->uri) _ws_free(ws->uri);
+    
+    return -1;
+}
+
+
 int ws_close_with_status_reason(ws_t ws, ws_close_status_t status, 
 							const char *reason, size_t reason_len)
 {

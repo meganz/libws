@@ -116,6 +116,20 @@ ws_base_t ws_get_base(ws_t ws);
 /// @returns			0 on success.
 ///
 int ws_connect(ws_t ws, const char *server, int port, const char *uri, uint8_t ipv6);
+    
+///
+/// Connects to a Websocket on a specified server
+///
+/// @param[in]	ws 		Websocket context.
+/// @param[in]	server	Websocket server hostname.
+/// @param[in]	port	Websocket server port.
+/// @param[in]  addr    Server address
+/// @param[in]  addrlen Address lenght
+/// @param[in]	uri 	The websocket uri.
+///
+/// @returns			0 on success.
+///
+int ws_connect_addr(ws_t ws, const char *server, struct sockaddr *addr, int addrlen, int port, const char *uri);
 
 ///
 /// Closes the websocket connection with the "1000 normal closure" status.
