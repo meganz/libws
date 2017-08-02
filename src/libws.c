@@ -223,7 +223,25 @@ int ws_global_init(ws_base_t base, struct event_base* evbase, struct evdns_base*
         base->marshall_timer_cb = ws_handle_marshall_timer_cb;
     }
 
-    _ws_global_openssl_init(base);
+#ifdef LIBWS_WITH_OPENSSL
+    if (_ws_global_openssl_init(base))
+    {
+        LIBWS_LOG(LIBWS_CRIT, "Failed to init OpenSSL");
+        if (base->ev_base)
+        {
+            event_base_free(base->ev_base);
+            base->ev_base = NULL;
+        }
+
+        if (base)
+        {
+            _ws_free(base);
+            base = NULL;
+        }
+
+        return -1;
+    }
+#endif
 
     return 0;
 }
@@ -237,6 +255,11 @@ void ws_global_destroy(ws_base_t *base)
         LIBWS_LOG(LIBWS_ERR, "Failed to close random source: %s (%d)", strerror(errno), errno);
     }
 #endif
+
+#ifdef LIBWS_WITH_OPENSSL
+    _ws_global_openssl_destroy(base);
+#endif
+
     _ws_free(*base);
 }
 #endif
