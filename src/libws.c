@@ -222,6 +222,9 @@ int ws_global_init(ws_base_t base, struct event_base* evbase, struct evdns_base*
         base->marshall_event_cb = ws_event_callback;
         base->marshall_timer_cb = ws_handle_marshall_timer_cb;
     }
+
+    _ws_global_openssl_init(base);
+
     return 0;
 }
 
