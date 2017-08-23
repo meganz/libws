@@ -603,7 +603,10 @@ int _ws_validate_header(ws_t ws)
 void _ws_read_websocket(ws_t ws, struct evbuffer *in)
 {
 	assert(ws);
-	assert(ws->bev);
+    if (!ws->bev)
+    {
+        return;
+    }
 	assert(in);
 
 	LIBWS_LOG(LIBWS_DEBUG2, "Read websocket data");
