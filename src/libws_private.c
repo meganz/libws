@@ -788,6 +788,12 @@ void ws_read_callback(struct bufferevent *bev, void *ptr)
 	assert(bev);
 	assert(ws->bev == bev);
 
+        //libevent may send us EOF and then ERROR, in which case we have
+        //already shut down the connection, freed ws->bev, and called the close cb,
+        //so we should just ignore the ERROR event
+        if (!ws->bev)
+            return;
+
 	LIBWS_LOG(LIBWS_DEBUG, "Read callback");
 
 	in = bufferevent_get_input(ws->bev);
@@ -881,6 +887,12 @@ static void _ws_eof_event(struct bufferevent *bev, short events, void *ptr)
 	ws_close_status_t status;
 	struct evbuffer *in;
 	assert(ws);
+
+        //libevent may send us EOF and then ERROR, in which case we have
+        //already shut down the connection, freed ws->bev, and called the close cb,
+        //so we should just ignore the ERROR event
+        if (!ws->bev)
+            return;
 
 	LIBWS_LOG(LIBWS_TRACE, "EOF event");
 
