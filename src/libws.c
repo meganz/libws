@@ -478,21 +478,22 @@ int ws_connect_addr(ws_t ws, const char *server, struct sockaddr *addr, int addr
     ws->sent_close = 0;
     ws->in_msg = 0;
     
-    if (_ws_create_bufferevent_socket(ws))
+    int r;
+    if ((r = _ws_create_bufferevent_socket(ws)))
     {
         LIBWS_LOG(LIBWS_ERR, "Failed to create bufferevent socket");
         goto fail;
     }
     
     ws->state = WS_STATE_CONNECTING;
-    if (bufferevent_socket_connect(ws->bev, addr, addrlen))
+    if ((r = bufferevent_socket_connect(ws->bev, addr, addrlen)))
     {
         LIBWS_LOG(LIBWS_ERR, "Immediate bufferevent_socket_connect_hostname failure");
         goto fail;
     }
     
     // Setup a timeout event for the connection attempt.
-    if (_ws_setup_connection_timeout(ws))
+    if ((r = _ws_setup_connection_timeout(ws)))
     {
         LIBWS_LOG(LIBWS_ERR, "Failed to setup connection timeout event");
         goto fail;
@@ -503,7 +504,7 @@ fail:
     if (ws->server) _ws_free(ws->server);
     if (ws->uri) _ws_free(ws->uri);
     
-    return -1;
+    return r;
 }
 
 
